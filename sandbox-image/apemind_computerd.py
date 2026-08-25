@@ -34,11 +34,17 @@ def _log(msg: str) -> None:
     print(f"apemind-computerd: {msg}", flush=True)
 
 
+USER_AGENT = "apemind-computer/0.1.7"
+
+
 def _api(base: str, path: str, payload: dict) -> dict:
     req = urllib.request.Request(
         base.rstrip("/") + path,
         data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
+        headers={
+            "Content-Type": "application/json",
+            "User-Agent": USER_AGENT,
+        },
         method="POST",
     )
     with urllib.request.urlopen(req, timeout=15) as resp:
