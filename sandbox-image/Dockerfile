@@ -26,6 +26,8 @@ COPY supervisord.nginx.conf /opt/gem/supervisord/nginx.conf
 COPY tinyproxy.sh /opt/gem/tinyproxy.sh
 COPY nginx.conf.template /opt/treadstone/templates/nginx.conf.template
 COPY tinyproxy-base.conf /opt/gem/tinyproxy/base.conf
+COPY apemind_computerd.py /opt/gem/apemind_computerd.py
+COPY supervisord.computerd.conf /opt/gem/supervisord/computerd.conf
 
 RUN set -euo pipefail \
     && if ! getent group gem >/dev/null; then groupadd --gid 1000 gem; fi \
@@ -35,6 +37,8 @@ RUN set -euo pipefail \
          /opt/treadstone/home-template \
          /var/log/nginx \
          /var/lib/nginx \
+         /var/lib/apemind-computer \
+         /home/gem/dsh \
     && for home_dir in /home/gem /opt/treadstone/home-template; do \
          install -d -m 755 -o gem -g gem \
            "${home_dir}" \
@@ -55,7 +59,7 @@ RUN set -euo pipefail \
          /var/log/nginx \
          /var/lib/nginx \
     && touch /var/log/nginx/error.log \
-    && chmod 755 /opt/gem/run.sh /opt/gem/entrypoint.sh /opt/gem/tinyproxy.sh
+    && chmod 755 /opt/gem/run.sh /opt/gem/entrypoint.sh /opt/gem/tinyproxy.sh /opt/gem/apemind_computerd.py
 
 ENV USER=gem \
     USER_UID=1000 \
