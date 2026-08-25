@@ -27,7 +27,7 @@ CHILD_RESTART_BACKOFF = float(os.environ.get("APEMIND_CHILD_RESTART_BACKOFF", "2
 _children: dict[str, subprocess.Popen] = {}
 _ports: dict[str, int] = {}
 _crash_until: dict[str, float] = {}
-_stop = False
+_shutdown = False
 
 
 def _log(msg: str) -> None:
@@ -113,6 +113,15 @@ def _start(agent: dict) -> None:
     env["HOME"] = str(work)
     env["XDG_CONFIG_HOME"] = str(work / ".config")
     env["XDG_DATA_HOME"] = str(work / ".local" / "share")
+    owner = str(agent.get("owner_user_id") or "")
+    if owner:
+        env["APEMIND_USER_ID"] = owner
+        ident = work / ".apemind" / "identity"
+        ident.parent.mkdir(parents=True, exist_ok=True)
+        tmp = ident.with_name(ident.name + ".tmp")
+        tmp.write_text(json.dumps({"user_id": owner}))
+        tmp.chmod(0o600)
+        tmp.replace(ident)
     proc = subprocess.Popen(
         ["dsh", "web", "--no-open", "--port", str(port)],
         cwd=str(work),
@@ -125,7 +134,7 @@ def _start(agent: dict) -> None:
     _log(f"started {agent_id} on 127.0.0.1:{port}")
 
 
-def _stop(agent_id: str) -> None:
+def _stop_agent(agent_id: str) -> None:
     proc = _children.pop(agent_id, None)
     _ports.pop(agent_id, None)
     if proc is None:
@@ -184,8 +193,8 @@ def _observe(known_ids: set[str] | None = None) -> list[dict]:
 
 
 def _handle_stop(_signum, _frame) -> None:
-    global _stop
-    _stop = True
+    global _shutdown
+    _shutdown = True
 
 
 def main() -> int:
@@ -195,13 +204,13 @@ def main() -> int:
     token = os.environ.get("APEMIND_JOIN_TOKEN", "").strip()
     if not base or not token:
         _log("APEMIND_URL and APEMIND_JOIN_TOKEN are required; idle")
-        while not _stop:
+        while not _shutdown:
             time.sleep(POLL_SECONDS)
         return 0
     session = ""
     delay = POLL_SECONDS
     applied_rev: dict[str, int] = {}
-    while not _stop:
+    while not _shutdown:
         try:
             if not session:
                 state = _join(base, token)
@@ -218,11 +227,11 @@ def main() -> int:
                         _start(agent)
                         applied_rev[agent["id"]] = rev
                 else:
-                    _stop(agent["id"])
+                    _stop_agent(agent["id"])
                     applied_rev[agent["id"]] = rev
             for agent_id in list(_children):
                 if agent_id not in want_ids:
-                    _stop(agent_id)
+                    _stop_agent(agent_id)
             _api(
                 base,
                 "/api/v2/computer-control/observed",
@@ -240,10 +249,10 @@ def main() -> int:
             _log(f"loop error: {exc}")
             delay = _next_backoff(delay)
         deadline = time.time() + delay
-        while not _stop and time.time() < deadline:
+        while not _shutdown and time.time() < deadline:
             time.sleep(min(1.0, max(0.0, deadline - time.time())))
     for agent_id in list(_children):
-        _stop(agent_id)
+        _stop_agent(agent_id)
     return 0
 
 
