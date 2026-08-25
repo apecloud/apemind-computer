@@ -32,6 +32,28 @@ def test_start_sets_private_dsh_home(tmp_path):
     assert daemon._children["agt-a"] is fake
 
 
+def test_api_sends_explicit_user_agent(monkeypatch):
+    captured = {}
+
+    class _Resp:
+        def read(self):
+            return b"{}"
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+    def _urlopen(req, timeout=15):
+        captured["ua"] = req.get_header("User-agent")
+        return _Resp()
+
+    monkeypatch.setattr(daemon.urllib.request, "urlopen", _urlopen)
+    daemon._api("https://example.test", "/api/v2/computer-control/join", {"token": "t"})
+    assert captured["ua"] == daemon.USER_AGENT
+
+
 def test_shutdown_flag_is_not_the_stop_function():
     assert daemon._shutdown is False
     assert callable(daemon._stop_agent)
