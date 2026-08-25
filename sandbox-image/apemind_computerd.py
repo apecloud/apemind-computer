@@ -90,8 +90,11 @@ def _start(agent: dict) -> None:
         return
     work = Path(agent.get("work_dir") or (DSH_ROOT / agent_id))
     work.mkdir(parents=True, exist_ok=True)
+    dsh_home = work / ".dsh"
+    dsh_home.mkdir(parents=True, exist_ok=True)
     port = _pick_port()
     env = os.environ.copy()
+    env["DSH_HOME"] = str(dsh_home)
     proc = subprocess.Popen(
         ["dsh", "web", "--no-open", "--port", str(port)],
         cwd=str(work),
@@ -118,10 +121,12 @@ def _stop(agent_id: str) -> None:
     _log(f"stopped {agent_id}")
 
 
-def _observe() -> list[dict]:
+def _observe(known_ids: set[str] | None = None) -> list[dict]:
     rows = []
+    seen: set[str] = set()
     for agent_id, proc in list(_children.items()):
         code = proc.poll()
+        seen.add(agent_id)
         if code is None:
             rows.append(
                 {
@@ -143,6 +148,18 @@ def _observe() -> list[dict]:
             )
             _children.pop(agent_id, None)
             _ports.pop(agent_id, None)
+    for agent_id in known_ids or set():
+        if agent_id in seen:
+            continue
+        rows.append(
+            {
+                "id": agent_id,
+                "observed": "stopped",
+                "observed_error": None,
+                "observed_port": None,
+                "work_dir": None,
+            }
+        )
     return rows
 
 
@@ -190,7 +207,7 @@ def main() -> int:
             _api(
                 base,
                 "/api/v2/computer-control/observed",
-                {"session_token": session, "agents": _observe()},
+                {"session_token": session, "agents": _observe(want_ids)},
             )
         except urllib.error.HTTPError as exc:
             _log(f"control error {exc.code}")
