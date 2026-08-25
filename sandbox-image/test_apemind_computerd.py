@@ -32,6 +32,43 @@ def test_start_sets_private_dsh_home(tmp_path):
     assert daemon._children["agt-a"] is fake
 
 
+def test_forward_uses_local_agent_port(monkeypatch):
+    daemon._ports.clear()
+    daemon._ports["agt-t"] = 3088
+    captured = {}
+
+    class _Resp:
+        status = 200
+        headers = {"content-type": "text/plain"}
+
+        def read(self):
+            return b"hi"
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+    def _urlopen(req, timeout=20):
+        captured["url"] = req.full_url
+        captured["method"] = req.get_method()
+        return _Resp()
+
+    monkeypatch.setattr(daemon.urllib.request, "urlopen", _urlopen)
+    out = daemon._forward({"id": "r1", "agent_id": "agt-t", "method": "GET", "path": "/", "headers": {}, "body": ""})
+    assert captured["url"] == "http://127.0.0.1:3088/"
+    assert captured["method"] == "GET"
+    assert out["status"] == 200
+    assert out["body"] == "hi"
+
+
+def test_forward_without_port_is_unavailable():
+    daemon._ports.clear()
+    out = daemon._forward({"id": "r2", "agent_id": "missing", "method": "GET", "path": "/", "headers": {}, "body": ""})
+    assert out["status"] == 503
+
+
 def test_api_sends_explicit_user_agent(monkeypatch):
     captured = {}
 
