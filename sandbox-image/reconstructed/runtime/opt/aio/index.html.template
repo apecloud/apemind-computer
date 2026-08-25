@@ -465,7 +465,7 @@
                     },
                     browser: {
                         title: 'Browser',
-                        baseUrl: '/vnc/index.html',
+                        baseUrl: '/vnc/',
                         defaultParams: {
                             autoconnect: 'true',
                             resize: 'scale',
