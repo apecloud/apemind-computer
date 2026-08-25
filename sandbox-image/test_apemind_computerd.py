@@ -11,15 +11,19 @@ import apemind_computerd as daemon
 def test_start_sets_private_dsh_home(tmp_path):
     daemon._children.clear()
     daemon._ports.clear()
-    agent = {"id": "agt-a", "work_dir": str(tmp_path / "a")}
+    agent = {"id": "agt-a", "work_dir": str(tmp_path / "a"), "owner_user_id": "user-1"}
     fake = SimpleNamespace(poll=lambda: None)
 
     def _popen(cmd, cwd, env, stdout, stderr):
         assert env["DSH_HOME"] == str(Path(cwd) / ".dsh")
         assert env["HOME"] == cwd
         assert env["XDG_CONFIG_HOME"] == str(Path(cwd) / ".config")
+        assert env["APEMIND_USER_ID"] == "user-1"
         assert env["DSH_HOME"] != os.path.expanduser("~/.dsh")
         assert Path(env["DSH_HOME"]).is_dir()
+        ident = Path(cwd) / ".apemind" / "identity"
+        assert ident.read_text() == '{"user_id": "user-1"}'
+        assert ident.stat().st_mode & 0o777 == 0o600
         return fake
 
     with patch("apemind_computerd.subprocess.Popen", side_effect=_popen):

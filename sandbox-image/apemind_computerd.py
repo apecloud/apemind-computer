@@ -113,6 +113,15 @@ def _start(agent: dict) -> None:
     env["HOME"] = str(work)
     env["XDG_CONFIG_HOME"] = str(work / ".config")
     env["XDG_DATA_HOME"] = str(work / ".local" / "share")
+    owner = str(agent.get("owner_user_id") or "")
+    if owner:
+        env["APEMIND_USER_ID"] = owner
+        ident = work / ".apemind" / "identity"
+        ident.parent.mkdir(parents=True, exist_ok=True)
+        tmp = ident.with_name(ident.name + ".tmp")
+        tmp.write_text(json.dumps({"user_id": owner}))
+        tmp.chmod(0o600)
+        tmp.replace(ident)
     proc = subprocess.Popen(
         ["dsh", "web", "--no-open", "--port", str(port)],
         cwd=str(work),
