@@ -54,6 +54,7 @@ def _load_state() -> dict:
 def _save_state(data: dict) -> None:
     STATE_DIR.mkdir(parents=True, exist_ok=True)
     STATE_FILE.write_text(json.dumps(data))
+    STATE_FILE.chmod(0o600)
 
 
 def _join(base: str, token: str) -> dict:
@@ -95,6 +96,9 @@ def _start(agent: dict) -> None:
     port = _pick_port()
     env = os.environ.copy()
     env["DSH_HOME"] = str(dsh_home)
+    env["HOME"] = str(work)
+    env["XDG_CONFIG_HOME"] = str(work / ".config")
+    env["XDG_DATA_HOME"] = str(work / ".local" / "share")
     proc = subprocess.Popen(
         ["dsh", "web", "--no-open", "--port", str(port)],
         cwd=str(work),

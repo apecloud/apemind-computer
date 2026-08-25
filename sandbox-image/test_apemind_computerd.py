@@ -16,6 +16,8 @@ def test_start_sets_private_dsh_home(tmp_path):
 
     def _popen(cmd, cwd, env, stdout, stderr):
         assert env["DSH_HOME"] == str(Path(cwd) / ".dsh")
+        assert env["HOME"] == cwd
+        assert env["XDG_CONFIG_HOME"] == str(Path(cwd) / ".config")
         assert env["DSH_HOME"] != os.path.expanduser("~/.dsh")
         assert Path(env["DSH_HOME"]).is_dir()
         return fake
@@ -24,6 +26,13 @@ def test_start_sets_private_dsh_home(tmp_path):
         with patch("apemind_computerd._pick_port", return_value=3080):
             daemon._start(agent)
     assert daemon._children["agt-a"] is fake
+
+
+def test_save_state_is_owner_readable_only(tmp_path, monkeypatch):
+    monkeypatch.setattr(daemon, "STATE_DIR", tmp_path)
+    monkeypatch.setattr(daemon, "STATE_FILE", tmp_path / "session.json")
+    daemon._save_state({"session_token": "x"})
+    assert (tmp_path / "session.json").stat().st_mode & 0o777 == 0o600
 
 
 def test_observe_reports_stopped_after_stop():
