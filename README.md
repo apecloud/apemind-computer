@@ -1,9 +1,8 @@
 # ApeMind Computer
 
-Treadstone sandbox image as the ApeMind Computer host. Later this image will run many long-running DeepSeek Harness agents.
+Official Computer image. The sandbox Dockerfile tree lives in this repo under `sandbox-image/` so it can be changed here. It was copied from [earayu/treadstone](https://github.com/earayu/treadstone) `deploy/sandbox-image` (Apache-2.0). Treadstone control plane is not in this repo.
 
-Base image: `ghcr.io/earayu/treadstone-sandbox:v0.2.1`  
-Source: [earayu/treadstone](https://github.com/earayu/treadstone)
+Later this image will run many long-running DeepSeek Harness agents.
 
 ## Published images
 
@@ -15,7 +14,7 @@ After a tagged release:
 ## Release
 
 1. Push tag `vX.Y.Z`, or run **Release image** and pass `version=vX.Y.Z`.
-2. GitHub Actions builds from `Dockerfile` and pushes both registries.
+2. GitHub Actions builds `sandbox-image/reconstructed` from Ubuntu, then `sandbox-image`, and pushes both registries.
 3. Do not build the image on a laptop.
 
 ## What is not in this slice

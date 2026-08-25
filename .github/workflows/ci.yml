@@ -18,8 +18,13 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Dockerfile exists and pins the Treadstone sandbox
+      - name: Sandbox sources are in-repo and not a remote Treadstone FROM
         run: |
           set -euo pipefail
-          test -f Dockerfile
-          grep -q 'ghcr.io/earayu/treadstone-sandbox:v0.2.1' Dockerfile
+          test -f sandbox-image/Dockerfile
+          test -f sandbox-image/reconstructed/Dockerfile
+          if grep -R -n 'ghcr.io/earayu/treadstone-sandbox' sandbox-image Dockerfile 2>/dev/null; then
+            echo "sandbox image must not FROM ghcr.io/earayu/treadstone-sandbox"
+            exit 1
+          fi
+          grep -q 'FROM ubuntu:22.04' sandbox-image/reconstructed/Dockerfile
