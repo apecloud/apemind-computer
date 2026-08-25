@@ -25,7 +25,7 @@ env:
 
 jobs:
   docker:
-    runs-on: [self-hosted, linux, x64, 8c]
+    runs-on: ubuntu-latest
     timeout-minutes: 180
     steps:
       - uses: actions/checkout@v4

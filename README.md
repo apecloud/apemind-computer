@@ -30,4 +30,4 @@ Same names as `apecloud/aperag-enterprise`:
 - `ALIYUN_REGISTRY_USER`
 - `ALIYUN_REGISTRY_PASSWORD`
 
-Grant this repository those org/repo secrets and the `[self-hosted, linux, x64, 8c]` runner group, or the publish job cannot run.
+Grant this repository those org/repo secrets, or the publish job cannot run. Image jobs use GitHub-hosted `ubuntu-latest`.
