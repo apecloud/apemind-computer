@@ -21,9 +21,12 @@ STATE_FILE = STATE_DIR / "session.json"
 DSH_ROOT = Path(os.environ.get("APEMIND_DSH_ROOT", "/home/gem/dsh"))
 BASE_PORT = int(os.environ.get("APEMIND_DSH_BASE_PORT", "3080"))
 POLL_SECONDS = float(os.environ.get("APEMIND_POLL_SECONDS", "5"))
+BACKOFF_CAP = float(os.environ.get("APEMIND_BACKOFF_CAP", "60"))
+CHILD_RESTART_BACKOFF = float(os.environ.get("APEMIND_CHILD_RESTART_BACKOFF", "2"))
 
 _children: dict[str, subprocess.Popen] = {}
 _ports: dict[str, int] = {}
+_crash_until: dict[str, float] = {}
 _stop = False
 
 
@@ -51,10 +54,18 @@ def _load_state() -> dict:
     return {}
 
 
+def _next_backoff(current: float) -> float:
+    if current <= 0:
+        return POLL_SECONDS
+    return min(max(current, POLL_SECONDS) * 2, BACKOFF_CAP)
+
+
 def _save_state(data: dict) -> None:
     STATE_DIR.mkdir(parents=True, exist_ok=True)
-    STATE_FILE.write_text(json.dumps(data))
-    STATE_FILE.chmod(0o600)
+    tmp = STATE_FILE.with_name(STATE_FILE.name + ".tmp")
+    tmp.write_text(json.dumps(data))
+    tmp.chmod(0o600)
+    tmp.replace(STATE_FILE)
 
 
 def _join(base: str, token: str) -> dict:
@@ -88,6 +99,9 @@ def _alive(agent_id: str) -> bool:
 def _start(agent: dict) -> None:
     agent_id = agent["id"]
     if _alive(agent_id):
+        return
+    until = _crash_until.get(agent_id, 0)
+    if until and time.time() < until:
         return
     work = Path(agent.get("work_dir") or (DSH_ROOT / agent_id))
     work.mkdir(parents=True, exist_ok=True)
@@ -152,6 +166,8 @@ def _observe(known_ids: set[str] | None = None) -> list[dict]:
             )
             _children.pop(agent_id, None)
             _ports.pop(agent_id, None)
+            if code:
+                _crash_until[agent_id] = time.time() + CHILD_RESTART_BACKOFF
     for agent_id in known_ids or set():
         if agent_id in seen:
             continue
@@ -182,16 +198,15 @@ def main() -> int:
         while not _stop:
             time.sleep(POLL_SECONDS)
         return 0
-    try:
-        state = _join(base, token)
-    except Exception as exc:
-        _log(f"join failed: {exc}")
-        return 1
-    session = state["session_token"]
-    _log(f"joined {state.get('computer_id')}")
+    session = ""
+    delay = POLL_SECONDS
     applied_rev: dict[str, int] = {}
     while not _stop:
         try:
+            if not session:
+                state = _join(base, token)
+                session = state["session_token"]
+                _log(f"joined {state.get('computer_id')}")
             _api(base, "/api/v2/computer-control/heartbeat", {"session_token": session})
             desired = _api(base, "/api/v2/computer-control/desired", {"session_token": session})
             want_ids = set()
@@ -213,11 +228,20 @@ def main() -> int:
                 "/api/v2/computer-control/observed",
                 {"session_token": session, "agents": _observe(want_ids)},
             )
+            delay = POLL_SECONDS
         except urllib.error.HTTPError as exc:
             _log(f"control error {exc.code}")
+            if exc.code in (401, 404):
+                session = ""
+                if STATE_FILE.is_file():
+                    STATE_FILE.unlink()
+            delay = _next_backoff(delay)
         except Exception as exc:
             _log(f"loop error: {exc}")
-        time.sleep(POLL_SECONDS)
+            delay = _next_backoff(delay)
+        deadline = time.time() + delay
+        while not _stop and time.time() < deadline:
+            time.sleep(min(1.0, max(0.0, deadline - time.time())))
     for agent_id in list(_children):
         _stop(agent_id)
     return 0

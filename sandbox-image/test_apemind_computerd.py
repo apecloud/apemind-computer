@@ -28,6 +28,12 @@ def test_start_sets_private_dsh_home(tmp_path):
     assert daemon._children["agt-a"] is fake
 
 
+def test_next_backoff_doubles_then_caps():
+    assert daemon._next_backoff(5) == 10
+    assert daemon._next_backoff(40) == 60
+    assert daemon._next_backoff(0) == daemon.POLL_SECONDS
+
+
 def test_save_state_is_owner_readable_only(tmp_path, monkeypatch):
     monkeypatch.setattr(daemon, "STATE_DIR", tmp_path)
     monkeypatch.setattr(daemon, "STATE_FILE", tmp_path / "session.json")
