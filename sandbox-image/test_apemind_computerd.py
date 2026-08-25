@@ -28,6 +28,11 @@ def test_start_sets_private_dsh_home(tmp_path):
     assert daemon._children["agt-a"] is fake
 
 
+def test_shutdown_flag_is_not_the_stop_function():
+    assert daemon._shutdown is False
+    assert callable(daemon._stop_agent)
+
+
 def test_next_backoff_doubles_then_caps():
     assert daemon._next_backoff(5) == 10
     assert daemon._next_backoff(40) == 60
@@ -47,7 +52,7 @@ def test_observe_reports_stopped_after_stop():
     proc = SimpleNamespace(poll=lambda: None, terminate=lambda: None, wait=lambda timeout: None, kill=lambda: None)
     daemon._children["agt-b"] = proc
     daemon._ports["agt-b"] = 3081
-    daemon._stop("agt-b")
+    daemon._stop_agent("agt-b")
     rows = daemon._observe({"agt-b"})
     assert rows == [
         {
