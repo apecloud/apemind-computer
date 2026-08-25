@@ -11,6 +11,7 @@ import signal
 import socket
 import subprocess
 import sys
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -37,7 +38,7 @@ def _log(msg: str) -> None:
 USER_AGENT = "apemind-computer/0.1.7"
 
 
-def _api(base: str, path: str, payload: dict) -> dict:
+def _api(base: str, path: str, payload: dict, timeout: float = 15) -> dict:
     req = urllib.request.Request(
         base.rstrip("/") + path,
         data=json.dumps(payload).encode("utf-8"),
@@ -47,11 +48,66 @@ def _api(base: str, path: str, payload: dict) -> dict:
         },
         method="POST",
     )
-    with urllib.request.urlopen(req, timeout=15) as resp:
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
         raw = resp.read()
     if not raw:
         return {}
     return json.loads(raw.decode("utf-8"))
+
+
+def _forward(item: dict) -> dict:
+    port = _ports.get(str(item.get("agent_id") or ""))
+    if not port:
+        return {"id": item.get("id"), "status": 503, "headers": {}, "body": ""}
+    path = item.get("path") or "/"
+    url = f"http://127.0.0.1:{port}{path}"
+    headers = dict(item.get("headers") or {})
+    raw_body = str(item.get("body") or "").encode("latin1")
+    req = urllib.request.Request(
+        url,
+        data=raw_body or None,
+        headers=headers,
+        method=str(item.get("method") or "GET"),
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            return {
+                "id": item.get("id"),
+                "status": int(resp.status),
+                "headers": {key: value for key, value in resp.headers.items()},
+                "body": resp.read().decode("latin1"),
+            }
+    except urllib.error.HTTPError as exc:
+        return {
+            "id": item.get("id"),
+            "status": int(exc.code),
+            "headers": {},
+            "body": exc.read().decode("latin1"),
+        }
+    except Exception:
+        return {"id": item.get("id"), "status": 502, "headers": {}, "body": ""}
+
+
+def _tunnel_once(base: str, session: str) -> None:
+    item = _api(base, "/api/v2/computer-control/tunnel/pull", {"session_token": session}, timeout=25)
+    if not item.get("id"):
+        return
+    reply = _forward(item)
+    reply["session_token"] = session
+    _api(base, "/api/v2/computer-control/tunnel/reply", reply)
+
+
+def _tunnel_loop(base: str, holder: dict) -> None:
+    while not _shutdown:
+        session = holder.get("session") or ""
+        if not session:
+            time.sleep(1)
+            continue
+        try:
+            _tunnel_once(base, session)
+        except Exception as exc:
+            _log(f"tunnel error: {exc}")
+            time.sleep(1)
 
 
 def _load_state() -> dict:
@@ -214,6 +270,8 @@ def main() -> int:
             time.sleep(POLL_SECONDS)
         return 0
     session = ""
+    holder = {"session": ""}
+    threading.Thread(target=_tunnel_loop, args=(base, holder), daemon=True).start()
     delay = POLL_SECONDS
     applied_rev: dict[str, int] = {}
     while not _shutdown:
@@ -221,6 +279,7 @@ def main() -> int:
             if not session:
                 state = _join(base, token)
                 session = state["session_token"]
+                holder["session"] = session
                 _log(f"joined {state.get('computer_id')}")
             _api(base, "/api/v2/computer-control/heartbeat", {"session_token": session})
             desired = _api(base, "/api/v2/computer-control/desired", {"session_token": session})
@@ -248,6 +307,7 @@ def main() -> int:
             _log(f"control error {exc.code}")
             if exc.code in (401, 404):
                 session = ""
+                holder["session"] = ""
                 if STATE_FILE.is_file():
                     STATE_FILE.unlink()
             delay = _next_backoff(delay)
