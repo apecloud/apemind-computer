@@ -3,9 +3,19 @@
 import os
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import apemind_computerd as daemon
+
+
+def test_api_sets_user_agent():
+    response = MagicMock()
+    response.__enter__.return_value.read.return_value = b"{}"
+    with patch("apemind_computerd.urllib.request.urlopen", return_value=response) as urlopen:
+        daemon._api("https://example.com", "/join", {"token": "x"})
+
+    request = urlopen.call_args.args[0]
+    assert request.get_header("User-agent") == "apemind-computer"
 
 
 def test_start_sets_private_dsh_home(tmp_path):

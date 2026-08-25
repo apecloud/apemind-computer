@@ -38,7 +38,7 @@ def _api(base: str, path: str, payload: dict) -> dict:
     req = urllib.request.Request(
         base.rstrip("/") + path,
         data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
+        headers={"Content-Type": "application/json", "User-Agent": "apemind-computer"},
         method="POST",
     )
     with urllib.request.urlopen(req, timeout=15) as resp:
