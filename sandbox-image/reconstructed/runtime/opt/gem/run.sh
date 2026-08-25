@@ -4,9 +4,8 @@
 
 set -e
 
-# Convert DISABLE_* to supervisord autostart format
-export AUTOSTART_JUPYTER=$([ "$DISABLE_JUPYTER" != "true" ] && echo "true" || echo "false")
-export AUTOSTART_CODE_SERVER=$([ "$DISABLE_CODE_SERVER" != "true" ] && echo "true" || echo "false")
+export AUTOSTART_JUPYTER=false
+export AUTOSTART_CODE_SERVER=false
 
 # Create a non-root user
 if ! getent group $USER >/dev/null; then
@@ -27,21 +26,11 @@ fi
 
 
 
-chown -R $USER:$USER /opt/jupyter
-
 su - $USER -c 'bash -s' << 'EOF'
 mkdir -p /home/$USER/.npm-global/lib
 
 # bashrc - idempotent: copy template every time
 cp -f /opt/gem/bashrc /home/$USER/.bashrc
-
-# code-server
-mkdir -p /home/$USER/.config/code-server /home/$USER/.local/share/code-server \
-     && chmod -R 755 /home/$USER/.local/share/code-server/
-cp -rf /opt/gem/vscode /home/$USER/.config/code-server/vscode
-
-# jupyter - idempotent
-cp -rf /opt/gem/jupyter /home/$USER/.jupyter
 
 # matplotlib - idempotent
 mkdir -p /home/$USER/.config/matplotlib
@@ -56,12 +45,10 @@ if [ -f "/opt/gem/nginx/nginx.mcp_hub.conf" ]; then
   envsubst '${MCP_HUB_PORT}' <"/opt/gem/nginx/nginx.mcp_hub.conf" >"/opt/gem/nginx/mcp_hub.conf" && rm -f "/opt/gem/nginx/nginx.mcp_hub.conf"
   envsubst '${SANDBOX_SRV_PORT} ${MCP_SERVER_BROWSER_PORT} ${BROWSER_REMOTE_DEBUGGING_PORT}' <"/opt/gem/mcp-hub.json.template" >"/opt/gem/mcp-hub.json" && rm -f "/opt/gem/mcp-hub.json.template"
 fi
-if [ -f "/opt/gem/nginx/nginx.jupyter_lab.conf" ]; then
-  envsubst '${JUPYTER_LAB_PORT}' <"/opt/gem/nginx/nginx.jupyter_lab.conf" >"/opt/gem/nginx/jupyter_lab.conf" && rm -f "/opt/gem/nginx/nginx.jupyter_lab.conf"
-fi
-if [ -f "/opt/gem/nginx/nginx.code_server.conf" ]; then
-  envsubst '${CODE_SERVER_PORT}' <"/opt/gem/nginx/nginx.code_server.conf" >"/opt/gem/nginx/code_server.conf" && rm -f "/opt/gem/nginx/nginx.code_server.conf"
-fi
+rm -f /opt/gem/nginx/nginx.jupyter_lab.conf /opt/gem/nginx/jupyter_lab.conf \
+  /opt/gem/nginx/nginx.code_server.conf /opt/gem/nginx/code_server.conf \
+  /opt/gem/supervisord/supervisord.jupyter.conf /opt/gem/supervisord/jupyter.conf \
+  /opt/gem/supervisord/supervisord.code_server.conf /opt/gem/supervisord/code-server.conf
 
 export IMAGE_VERSION=$(cat /etc/aio_version)
 export OTEL_SDK_DISABLED=true

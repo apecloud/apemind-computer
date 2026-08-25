@@ -2,7 +2,7 @@
 
 Official Computer image. The sandbox Dockerfile tree lives in this repo under `sandbox-image/` so it can be changed here. It was copied from [earayu/treadstone](https://github.com/earayu/treadstone) `deploy/sandbox-image` (Apache-2.0). Treadstone control plane is not in this repo.
 
-Later this image will run many long-running DeepSeek Harness agents.
+The image keeps browser, bash, and filesystem. It installs DeepSeek Harness (`dsh`) and bubblewrap. It does not install VS Code, Jupyter, Claude Code, Codex, Kimi CLI, or Cursor Agent.
 
 ## Published images
 

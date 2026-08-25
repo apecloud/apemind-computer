@@ -22,8 +22,10 @@ copy_if_missing() {
   fi
 }
 
-export AUTOSTART_JUPYTER=$([ "${DISABLE_JUPYTER:-false}" != "true" ] && echo "true" || echo "false")
-export AUTOSTART_CODE_SERVER=$([ "${DISABLE_CODE_SERVER:-false}" != "true" ] && echo "true" || echo "false")
+export AUTOSTART_JUPYTER=false
+export AUTOSTART_CODE_SERVER=false
+export DISABLE_JUPYTER=true
+export DISABLE_CODE_SERVER=true
 export IMAGE_VERSION="$(cat /etc/aio_version 2>/dev/null || true)"
 export OTEL_SDK_DISABLED=true
 export NPM_CONFIG_PREFIX="${HOME}/.npm-global"
@@ -42,15 +44,11 @@ mkdir -p \
   "${XDG_RUNTIME_DIR}" \
   "${HOME}/.npm-global/lib" \
   "${HOME}/.config/browser/Default" \
-  "${HOME}/.config/code-server" \
-  "${HOME}/.local/share/code-server" \
   "${HOME}/.config/matplotlib"
 chmod 700 "${XDG_RUNTIME_DIR}"
 touch "${HOME}/.Xauthority"
 
 copy_if_missing /opt/treadstone/home-template/.bashrc "${HOME}/.bashrc"
-copy_if_missing /opt/treadstone/home-template/.config/code-server/vscode "${HOME}/.config/code-server/vscode"
-copy_if_missing /opt/treadstone/home-template/.jupyter "${HOME}/.jupyter"
 copy_if_missing /opt/treadstone/home-template/.config/matplotlib/matplotlibrc "${HOME}/.config/matplotlib/matplotlibrc"
 copy_if_missing /opt/treadstone/home-template/.config/browser/Default/Preferences "${HOME}/.config/browser/Default/Preferences"
 
@@ -63,12 +61,10 @@ rm -f /opt/gem/nginx/nginx.python_srv.conf
 envsubst '${MCP_HUB_PORT}' \
   </opt/gem/nginx/nginx.mcp_hub.conf >/opt/gem/nginx/mcp_hub.conf
 rm -f /opt/gem/nginx/nginx.mcp_hub.conf
-envsubst '${JUPYTER_LAB_PORT}' \
-  </opt/gem/nginx/nginx.jupyter_lab.conf >/opt/gem/nginx/jupyter_lab.conf
-rm -f /opt/gem/nginx/nginx.jupyter_lab.conf
-envsubst '${CODE_SERVER_PORT}' \
-  </opt/gem/nginx/nginx.code_server.conf >/opt/gem/nginx/code_server.conf
-rm -f /opt/gem/nginx/nginx.code_server.conf
+rm -f /opt/gem/nginx/nginx.jupyter_lab.conf /opt/gem/nginx/jupyter_lab.conf \
+  /opt/gem/nginx/nginx.code_server.conf /opt/gem/nginx/code_server.conf \
+  /opt/gem/supervisord/supervisord.jupyter.conf /opt/gem/supervisord/jupyter.conf \
+  /opt/gem/supervisord/supervisord.code_server.conf /opt/gem/supervisord/code-server.conf
 envsubst '${PUBLIC_PORT}' \
   </opt/gem/nginx-server-port-proxy.conf.template >/opt/gem/nginx-server-port-proxy.conf
 envsubst '${SANDBOX_SRV_PORT} ${MCP_SERVER_BROWSER_PORT} ${BROWSER_REMOTE_DEBUGGING_PORT}' \

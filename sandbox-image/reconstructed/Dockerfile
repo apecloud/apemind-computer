@@ -3,12 +3,9 @@ FROM ubuntu:22.04
 ARG TARGETARCH
 ARG VERSION=1.0.0.152
 ARG NODEJS_SETUP_URL=https://deb.nodesource.com/setup_22.x
-ARG CODE_SERVER_VERSION=4.104.0
 ARG MCP_HUB_VERSION=1.1.0
 ARG MCP_SERVER_BROWSER_VERSION=1.2.21
 ARG CHROME_DEVTOOLS_MCP_VERSION=0.9.0
-ARG JUPYTER_CLIENT_VERSION=8.6.3
-ARG IPYKERNEL_VERSION=7.1.0
 ARG NOVNC_URL=https://github.com/novnc/noVNC/archive/refs/tags/v1.4.0.zip
 ARG WEBSOCAT_VERSION=v1.13.0
 ARG CHROMIUM_VERSION=133.0.6943.16
@@ -44,8 +41,6 @@ ENV WAIT_TIMEOUT=300
 ENV WAIT_INTERVAL=0.25
 ENV MCP_HUB_PORT=8079
 ENV SANDBOX_SRV_PORT=8091
-ENV JUPYTER_LAB_PORT=8888
-ENV CODE_SERVER_PORT=8200
 ENV MCP_SERVER_BROWSER_PORT=8100
 ENV TINYPROXY_PORT=8118
 ENV MAX_SHELL_SESSIONS=50
@@ -56,8 +51,8 @@ ENV BROWSER_NO_SANDBOX=
 ENV BROWSER_USER_AGENT="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"
 ENV UV_TOOL_BIN_DIR=/usr/local/bin/
 ENV UV_TOOL_DIR=/usr/local/share/uv/tools
-ENV DISABLE_JUPYTER=false
-ENV DISABLE_CODE_SERVER=false
+ENV DISABLE_JUPYTER=true
+ENV DISABLE_CODE_SERVER=true
 
 RUN if [ "${TARGETARCH:-amd64}" != "amd64" ]; then \
       echo "This reconstruction is currently validated only for linux/amd64." >&2; \
@@ -82,6 +77,7 @@ RUN set -eux; \
         sudo \
         supervisor \
         nginx \
+        bubblewrap \
         openbox \
         tigervnc-standalone-server \
         tinyproxy \
@@ -160,7 +156,7 @@ COPY requirements-python-runtime.txt /tmp/requirements-python-runtime.txt
 
 RUN /opt/python3.12/bin/pip3.12 install --no-cache-dir -r /tmp/requirements-python-runtime.txt
 
-RUN mkdir -p /opt/browser /opt/runtime/nodejs /opt/jupyter/runtime /opt/jupyter/data /opt/aio /opt/terminal /etc/browser/policies/managed
+RUN mkdir -p /opt/browser /opt/runtime/nodejs /opt/aio /opt/terminal /etc/browser/policies/managed
 
 RUN curl -fsSL "${CHROMIUM_ZIP_AMD64}" -o /tmp/chrome-linux64.zip \
   && unzip -q /tmp/chrome-linux64.zip -d /opt/browser \
@@ -169,13 +165,6 @@ RUN curl -fsSL "${CHROMIUM_ZIP_AMD64}" -o /tmp/chrome-linux64.zip \
   && ln -sf /opt/browser/chrome /etc/alternatives/browser \
   && ln -sf /etc/alternatives/browser /usr/local/bin/browser \
   && rm -f /tmp/chrome-linux64.zip
-
-RUN curl -fsSL "https://github.com/coder/code-server/releases/download/v${CODE_SERVER_VERSION}/code-server-${CODE_SERVER_VERSION}-linux-amd64.tar.gz" \
-      -o /tmp/code-server.tar.gz \
-  && tar -xzf /tmp/code-server.tar.gz -C /tmp \
-  && mv "/tmp/code-server-${CODE_SERVER_VERSION}-linux-amd64" /opt/runtime/code-server \
-  && ln -sf /opt/runtime/code-server/bin/code-server /usr/bin/code-server \
-  && rm -f /tmp/code-server.tar.gz
 
 RUN curl -fsSL "${NOVNC_URL}" -o /tmp/novnc.zip \
   && unzip -q /tmp/novnc.zip -d /opt \
@@ -195,43 +184,8 @@ COPY runtime/ /
 
 RUN python3 -m pip install --no-cache-dir --upgrade pip setuptools wheel \
   && python3 -m pip install --no-cache-dir /opt/gem-server \
-  && python3 -m pip install --no-cache-dir "jupyter-client==${JUPYTER_CLIENT_VERSION}" "ipykernel==${IPYKERNEL_VERSION}" \
-  && /opt/python3.11/bin/python -m pip install --no-cache-dir "jupyter-client==${JUPYTER_CLIENT_VERSION}" "ipykernel==${IPYKERNEL_VERSION}" \
-  && ln -sf /usr/bin/python3 /usr/local/bin/python \
-  && python3 -m ipykernel install --prefix /usr/local --name python3.10 --display-name "Python 3.10" \
-  && python3 -m ipykernel install --prefix /usr/local --name python3 --display-name "Python 3 (ipykernel)" \
-  && /opt/python3.11/bin/python -m ipykernel install --prefix /usr/local --name python3.11 --display-name "Python 3.11"
+  && ln -sf /usr/bin/python3 /usr/local/bin/python
 
-RUN python3 - <<'PY'
-import json
-from pathlib import Path
-
-specs = {
-    "python3.10": {
-        "argv": ["/usr/bin/python3.10", "-m", "ipykernel_launcher", "-f", "{connection_file}"],
-        "display_name": "Python 3.10",
-        "language": "python",
-        "metadata": {"debugger": True},
-    },
-    "python3": {
-        "argv": ["python", "-m", "ipykernel_launcher", "-f", "{connection_file}"],
-        "display_name": "Python 3 (ipykernel)",
-        "language": "python",
-        "metadata": {"debugger": True},
-    },
-    "python3.11": {
-        "argv": ["/opt/python3.11/bin/python", "-Xfrozen_modules=off", "-m", "ipykernel_launcher", "-f", "{connection_file}"],
-        "display_name": "Python 3.11",
-        "language": "python",
-        "metadata": {"debugger": True},
-    },
-}
-
-base = Path("/usr/local/share/jupyter/kernels")
-for name, spec in specs.items():
-    path = base / name / "kernel.json"
-    path.write_text(json.dumps(spec, indent=1) + "\n")
-PY
 RUN mkdir -p /opt/python3.12/lib/python3.12/site-packages \
   && if [ -d /opt/python3.12/site-packages ]; then cp -a /opt/python3.12/site-packages/. /opt/python3.12/lib/python3.12/site-packages/; fi \
   && printf '%s\n' \
