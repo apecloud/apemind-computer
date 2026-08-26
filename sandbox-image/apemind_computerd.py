@@ -219,11 +219,15 @@ def _frp_spec(desired: dict | None = None) -> dict | None:
     suffix = str(
         block.get("domain_suffix") or os.environ.get("APEMIND_FRP_DOMAIN_SUFFIX") or "frp.internal"
     ).strip()
+    host_header = str(
+        block.get("host_header") or os.environ.get("APEMIND_FRP_HOST_HEADER") or ""
+    ).strip().split(":")[0].lower()
     return {
         "server": server,
         "port": port,
         "token": token,
         "domain_suffix": suffix or "frp.internal",
+        "host_header": host_header,
     }
 
 
@@ -253,6 +257,9 @@ def _render_frpc(computer_id: str, spec: dict, ports: dict[str, int]) -> str:
                 f'customDomains = ["{_toml_escape(domain)}"]',
             ]
         )
+        host_header = str(spec.get("host_header") or "").strip()
+        if host_header:
+            lines.append(f'hostHeaderRewrite = "{_toml_escape(host_header)}"')
     return "\n".join(lines) + "\n"
 
 
