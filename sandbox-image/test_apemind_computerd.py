@@ -1,6 +1,8 @@
 # Copyright 2026 ApeCloud, Inc.
 
 import os
+import threading
+import time
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -67,6 +69,119 @@ def test_forward_without_port_is_unavailable():
     daemon._ports.clear()
     out = daemon._forward({"id": "r2", "agent_id": "missing", "method": "GET", "path": "/", "headers": {}, "body": ""})
     assert out["status"] == 503
+
+
+def test_forward_keeps_plugin_path_and_forces_identity(monkeypatch):
+    daemon._ports.clear()
+    daemon._ports["agt-t"] = 3088
+    captured = {}
+
+    class _Resp:
+        status = 200
+        headers = {"content-type": "application/javascript"}
+
+        def read(self):
+            return b"ok"
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+    def _urlopen(req, timeout=20):
+        captured["url"] = req.full_url
+        captured["headers"] = {key.lower(): value for key, value in req.header_items()}
+        return _Resp()
+
+    monkeypatch.setattr(daemon.urllib.request, "urlopen", _urlopen)
+    path = "/plugins/@deepseek-ai/dsh-client-ui-settings/client.js?rev=5d1695c62b38"
+    out = daemon._forward(
+        {
+            "id": "r3",
+            "agent_id": "agt-t",
+            "method": "GET",
+            "path": path,
+            "headers": {
+                "Accept-Encoding": "gzip",
+                "Host": "computer-staging.apemind.ai",
+                "Connection": "keep-alive",
+            },
+            "body": "",
+        }
+    )
+    assert captured["url"] == f"http://127.0.0.1:3088{path}"
+    assert captured["headers"]["accept-encoding"] == "identity"
+    assert "host" not in captured["headers"]
+    assert "connection" not in captured["headers"]
+    assert out["status"] == 200
+
+
+def test_tunnel_worker_count_defaults_and_clamps(monkeypatch):
+    monkeypatch.delenv("APEMIND_TUNNEL_WORKERS", raising=False)
+    assert daemon._tunnel_worker_count() == 8
+    monkeypatch.setenv("APEMIND_TUNNEL_WORKERS", "0")
+    assert daemon._tunnel_worker_count() == 1
+    monkeypatch.setenv("APEMIND_TUNNEL_WORKERS", "99")
+    assert daemon._tunnel_worker_count() == 32
+    assert daemon._tunnel_worker_count("nope") == 8
+
+
+def test_start_tunnel_workers_starts_n(monkeypatch):
+    started = []
+
+    class _FakeThread:
+        def __init__(self, target=None, args=(), name=None, daemon=None):
+            started.append(name)
+
+        def start(self):
+            return None
+
+    monkeypatch.setattr(daemon.threading, "Thread", _FakeThread)
+    threads = daemon._start_tunnel_workers("https://example.test", {"session": "s"}, count=4)
+    assert len(threads) == 4
+    assert started == ["tunnel-0", "tunnel-1", "tunnel-2", "tunnel-3"]
+
+
+def test_two_tunnel_once_can_overlap(monkeypatch):
+    started = threading.Event()
+    release = threading.Event()
+    in_flight = {"n": 0, "max": 0}
+    lock = threading.Lock()
+
+    def _api(_base, path, payload, timeout=15):
+        if path.endswith("/pull"):
+            with lock:
+                in_flight["n"] += 1
+                in_flight["max"] = max(in_flight["max"], in_flight["n"])
+            started.set()
+            assert release.wait(1)
+            with lock:
+                in_flight["n"] -= 1
+            return {"id": payload.get("session_token"), "agent_id": "agt-t", "path": "/", "headers": {}, "body": ""}
+        return {}
+
+    monkeypatch.setattr(daemon, "_api", _api)
+    monkeypatch.setattr(
+        daemon,
+        "_forward",
+        lambda item: {"id": item.get("id"), "status": 200, "headers": {}, "body": ""},
+    )
+    workers = [
+        threading.Thread(target=daemon._tunnel_once, args=("https://example.test", "a")),
+        threading.Thread(target=daemon._tunnel_once, args=("https://example.test", "b")),
+    ]
+    for worker in workers:
+        worker.start()
+    assert started.wait(1)
+    deadline = time.time() + 1
+    while in_flight["max"] < 2 and time.time() < deadline:
+        time.sleep(0.01)
+    release.set()
+    for worker in workers:
+        worker.join(1)
+        assert not worker.is_alive()
+    assert in_flight["max"] >= 2
 
 
 def test_api_sends_explicit_user_agent(monkeypatch):
