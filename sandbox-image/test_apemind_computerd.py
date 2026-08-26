@@ -34,32 +34,60 @@ def test_start_sets_private_dsh_home(tmp_path):
     assert daemon._children["agt-a"] is fake
 
 
+class _FakeResp:
+    def __init__(self, body=b"hi", status=200, headers=None, lines=None):
+        self.status = status
+        self._body = body
+        self._headers = list((headers or {"content-type": "text/plain"}).items())
+        self._chunks = list(lines) if lines is not None else None
+        self.fp = self
+
+    def getheaders(self):
+        return self._headers
+
+    def read(self, amt=None):
+        data = self._body
+        self._body = b""
+        return data
+
+    def readline(self):
+        if not self._chunks:
+            return b""
+        return self._chunks.pop(0)
+
+
+class _FakeConn:
+    def __init__(self, captured, resp):
+        self._captured = captured
+        self._resp = resp
+
+    def request(self, method, path, body=None, headers=None):
+        self._captured["method"] = method
+        self._captured["path"] = path
+        self._captured["headers"] = {key.lower(): value for key, value in (headers or {}).items()}
+
+    def getresponse(self):
+        return self._resp
+
+    def close(self):
+        return None
+
+
 def test_forward_uses_local_agent_port(monkeypatch):
     daemon._ports.clear()
     daemon._ports["agt-t"] = 3088
     captured = {}
 
-    class _Resp:
-        status = 200
-        headers = {"content-type": "text/plain"}
+    def _conn(host, port, timeout=300):
+        captured["host"] = host
+        captured["port"] = port
+        return _FakeConn(captured, _FakeResp(b"hi"))
 
-        def read(self):
-            return b"hi"
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *_args):
-            return False
-
-    def _urlopen(req, timeout=20):
-        captured["url"] = req.full_url
-        captured["method"] = req.get_method()
-        return _Resp()
-
-    monkeypatch.setattr(daemon.urllib.request, "urlopen", _urlopen)
+    monkeypatch.setattr(daemon.http.client, "HTTPConnection", _conn)
     out = daemon._forward({"id": "r1", "agent_id": "agt-t", "method": "GET", "path": "/", "headers": {}, "body": ""})
-    assert captured["url"] == "http://127.0.0.1:3088/"
+    assert captured["host"] == "127.0.0.1"
+    assert captured["port"] == 3088
+    assert captured["path"] == "/"
     assert captured["method"] == "GET"
     assert out["status"] == 200
     assert out["body"] == "hi"
@@ -76,25 +104,10 @@ def test_forward_keeps_plugin_path_and_forces_identity(monkeypatch):
     daemon._ports["agt-t"] = 3088
     captured = {}
 
-    class _Resp:
-        status = 200
-        headers = {"content-type": "application/javascript"}
+    def _conn(host, port, timeout=300):
+        return _FakeConn(captured, _FakeResp(b"ok", headers={"content-type": "application/javascript"}))
 
-        def read(self):
-            return b"ok"
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *_args):
-            return False
-
-    def _urlopen(req, timeout=20):
-        captured["url"] = req.full_url
-        captured["headers"] = {key.lower(): value for key, value in req.header_items()}
-        return _Resp()
-
-    monkeypatch.setattr(daemon.urllib.request, "urlopen", _urlopen)
+    monkeypatch.setattr(daemon.http.client, "HTTPConnection", _conn)
     path = "/plugins/@deepseek-ai/dsh-client-ui-settings/client.js?rev=5d1695c62b38"
     out = daemon._forward(
         {
@@ -110,7 +123,7 @@ def test_forward_keeps_plugin_path_and_forces_identity(monkeypatch):
             "body": "",
         }
     )
-    assert captured["url"] == f"http://127.0.0.1:3088{path}"
+    assert captured["path"] == path
     assert captured["headers"]["accept-encoding"] == "identity"
     assert "host" not in captured["headers"]
     assert "connection" not in captured["headers"]
@@ -122,24 +135,10 @@ def test_forward_strips_browser_origin_headers(monkeypatch):
     daemon._ports["agt-t"] = 3088
     captured = {}
 
-    class _Resp:
-        status = 200
-        headers = {"content-type": "application/json"}
+    def _conn(host, port, timeout=300):
+        return _FakeConn(captured, _FakeResp(b"{}", headers={"content-type": "application/json"}))
 
-        def read(self):
-            return b"{}"
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *_args):
-            return False
-
-    def _urlopen(req, timeout=20):
-        captured["headers"] = {key.lower(): value for key, value in req.header_items()}
-        return _Resp()
-
-    monkeypatch.setattr(daemon.urllib.request, "urlopen", _urlopen)
+    monkeypatch.setattr(daemon.http.client, "HTTPConnection", _conn)
     out = daemon._forward(
         {
             "id": "r4",
@@ -167,6 +166,31 @@ def test_forward_strips_browser_origin_headers(monkeypatch):
     assert captured["headers"]["cookie"] == "computer_ui=ticket"
     assert captured["headers"]["accept-encoding"] == "identity"
     assert out["status"] == 200
+
+
+def test_iter_forward_yields_event_stream_lines(monkeypatch):
+    daemon._ports.clear()
+    daemon._ports["agt-t"] = 3088
+    resp = _FakeResp(
+        status=200,
+        headers={"content-type": "text/event-stream"},
+        lines=[b"data: a\n", b"\n", b"data: b\n"],
+    )
+
+    def _conn(host, port, timeout=300):
+        return _FakeConn({}, resp)
+
+    monkeypatch.setattr(daemon.http.client, "HTTPConnection", _conn)
+    parts = list(
+        daemon._iter_forward(
+            {"id": "r5", "agent_id": "agt-t", "method": "GET", "path": "/api/events", "headers": {}, "body": ""}
+        )
+    )
+    bodies = [part["body"] for part in parts if part["body"]]
+    assert parts[0]["done"] is False
+    assert parts[0]["status"] == 200
+    assert bodies == ["data: a\n", "\n", "data: b\n"]
+    assert parts[-1]["done"] is True
 
 
 def test_forward_headers_drops_origin_keeps_business():

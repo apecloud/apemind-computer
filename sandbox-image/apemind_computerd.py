@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import http.client
 import json
 import os
 import signal
@@ -99,44 +100,90 @@ def _forward_headers(headers: dict | None) -> dict[str, str]:
 
 
 def _forward(item: dict) -> dict:
+    parts = list(_iter_forward(item))
+    if not parts:
+        return {"id": item.get("id"), "status": 502, "headers": {}, "body": "", "done": True}
+    headers = {}
+    status = 502
+    body = []
+    for part in parts:
+        if part.get("headers"):
+            headers = part["headers"]
+        if part.get("status"):
+            status = part["status"]
+        if part.get("body"):
+            body.append(str(part["body"]))
+    return {
+        "id": item.get("id"),
+        "status": status,
+        "headers": headers,
+        "body": "".join(body),
+        "done": True,
+    }
+
+
+def _iter_forward(item: dict):
+    req_id = item.get("id")
     port = _ports.get(str(item.get("agent_id") or ""))
     if not port:
-        return {"id": item.get("id"), "status": 503, "headers": {}, "body": ""}
+        yield {"id": req_id, "status": 503, "headers": {}, "body": "", "done": True}
+        return
     path = item.get("path") or "/"
-    url = f"http://127.0.0.1:{port}{path}"
     raw_body = str(item.get("body") or "").encode("latin1")
-    req = urllib.request.Request(
-        url,
-        data=raw_body or None,
-        headers=_forward_headers(item.get("headers")),
-        method=str(item.get("method") or "GET"),
-    )
+    conn = http.client.HTTPConnection("127.0.0.1", port, timeout=300)
     try:
-        with urllib.request.urlopen(req, timeout=20) as resp:
-            return {
-                "id": item.get("id"),
-                "status": int(resp.status),
-                "headers": {key: value for key, value in resp.headers.items()},
-                "body": resp.read().decode("latin1"),
-            }
-    except urllib.error.HTTPError as exc:
-        return {
-            "id": item.get("id"),
-            "status": int(exc.code),
-            "headers": {},
-            "body": exc.read().decode("latin1"),
-        }
+        conn.request(
+            str(item.get("method") or "GET"),
+            path,
+            body=raw_body or None,
+            headers=_forward_headers(item.get("headers")),
+        )
+        resp = conn.getresponse()
+        headers = {key: value for key, value in resp.getheaders()}
+        yield {"id": req_id, "status": int(resp.status), "headers": headers, "body": "", "done": False}
+        content_type = ""
+        for key, value in headers.items():
+            if key.lower() == "content-type":
+                content_type = value.lower()
+                break
+        if "text/event-stream" in content_type:
+            while True:
+                line = resp.fp.readline()
+                if not line:
+                    break
+                yield {
+                    "id": req_id,
+                    "status": int(resp.status),
+                    "headers": {},
+                    "body": line.decode("latin1"),
+                    "done": False,
+                }
+        else:
+            while True:
+                buf = resp.read(2048)
+                if not buf:
+                    break
+                yield {
+                    "id": req_id,
+                    "status": int(resp.status),
+                    "headers": {},
+                    "body": buf.decode("latin1"),
+                    "done": False,
+                }
+        yield {"id": req_id, "status": int(resp.status), "headers": {}, "body": "", "done": True}
     except Exception:
-        return {"id": item.get("id"), "status": 502, "headers": {}, "body": ""}
+        yield {"id": req_id, "status": 502, "headers": {}, "body": "", "done": True}
+    finally:
+        conn.close()
 
 
 def _tunnel_once(base: str, session: str) -> None:
     item = _api(base, "/api/v2/computer-control/tunnel/pull", {"session_token": session}, timeout=25)
     if not item.get("id"):
         return
-    reply = _forward(item)
-    reply["session_token"] = session
-    _api(base, "/api/v2/computer-control/tunnel/reply", reply)
+    for reply in _iter_forward(item):
+        reply["session_token"] = session
+        _api(base, "/api/v2/computer-control/tunnel/reply", reply, timeout=30)
 
 
 def _tunnel_loop(base: str, holder: dict) -> None:
