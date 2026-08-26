@@ -38,6 +38,12 @@ _HOP_HEADERS = {
     "host",
     "content-length",
 }
+# Browser origin headers must not reach loopback dsh: it compares Origin to Host
+# and returns 403 forbidden when they disagree.
+_BROWSER_ORIGIN_HEADERS = {
+    "origin",
+    "referer",
+}
 
 _children: dict[str, subprocess.Popen] = {}
 _ports: dict[str, int] = {}
@@ -77,10 +83,15 @@ def _tunnel_worker_count(raw: str | None = None) -> int:
         return TUNNEL_WORKERS_DEFAULT
 
 
+def _drop_forward_header(name: str) -> bool:
+    key = name.lower()
+    return key in _HOP_HEADERS or key in _BROWSER_ORIGIN_HEADERS or key.startswith("sec-fetch-")
+
+
 def _forward_headers(headers: dict | None) -> dict[str, str]:
     outgoing: dict[str, str] = {}
     for key, value in dict(headers or {}).items():
-        if str(key).lower() in _HOP_HEADERS:
+        if _drop_forward_header(str(key)):
             continue
         outgoing[str(key)] = str(value)
     outgoing["Accept-Encoding"] = "identity"

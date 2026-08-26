@@ -117,6 +117,75 @@ def test_forward_keeps_plugin_path_and_forces_identity(monkeypatch):
     assert out["status"] == 200
 
 
+def test_forward_strips_browser_origin_headers(monkeypatch):
+    daemon._ports.clear()
+    daemon._ports["agt-t"] = 3088
+    captured = {}
+
+    class _Resp:
+        status = 200
+        headers = {"content-type": "application/json"}
+
+        def read(self):
+            return b"{}"
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+    def _urlopen(req, timeout=20):
+        captured["headers"] = {key.lower(): value for key, value in req.header_items()}
+        return _Resp()
+
+    monkeypatch.setattr(daemon.urllib.request, "urlopen", _urlopen)
+    out = daemon._forward(
+        {
+            "id": "r4",
+            "agent_id": "agt-t",
+            "method": "POST",
+            "path": "/api/host.listDirectory",
+            "headers": {
+                "Content-Type": "application/json",
+                "Origin": "https://computer-staging.apemind.ai",
+                "Referer": "https://computer-staging.apemind.ai/chat",
+                "Sec-Fetch-Site": "same-origin",
+                "Sec-Fetch-Mode": "cors",
+                "Sec-Fetch-Dest": "empty",
+                "Cookie": "computer_ui=ticket",
+            },
+            "body": "{}",
+        }
+    )
+    assert "origin" not in captured["headers"]
+    assert "referer" not in captured["headers"]
+    assert "sec-fetch-site" not in captured["headers"]
+    assert "sec-fetch-mode" not in captured["headers"]
+    assert "sec-fetch-dest" not in captured["headers"]
+    assert captured["headers"]["content-type"] == "application/json"
+    assert captured["headers"]["cookie"] == "computer_ui=ticket"
+    assert captured["headers"]["accept-encoding"] == "identity"
+    assert out["status"] == 200
+
+
+def test_forward_headers_drops_origin_keeps_business():
+    out = daemon._forward_headers(
+        {
+            "Origin": "https://computer-staging.apemind.ai",
+            "Referer": "https://computer-staging.apemind.ai/",
+            "Sec-Fetch-User": "?1",
+            "Content-Type": "application/json",
+        }
+    )
+    lowered = {key.lower(): value for key, value in out.items()}
+    assert "origin" not in lowered
+    assert "referer" not in lowered
+    assert "sec-fetch-user" not in lowered
+    assert lowered["content-type"] == "application/json"
+    assert lowered["accept-encoding"] == "identity"
+
+
 def test_tunnel_worker_count_defaults_and_clamps(monkeypatch):
     monkeypatch.delenv("APEMIND_TUNNEL_WORKERS", raising=False)
     assert daemon._tunnel_worker_count() == 8
