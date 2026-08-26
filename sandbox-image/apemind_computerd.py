@@ -24,6 +24,20 @@ BASE_PORT = int(os.environ.get("APEMIND_DSH_BASE_PORT", "3080"))
 POLL_SECONDS = float(os.environ.get("APEMIND_POLL_SECONDS", "5"))
 BACKOFF_CAP = float(os.environ.get("APEMIND_BACKOFF_CAP", "60"))
 CHILD_RESTART_BACKOFF = float(os.environ.get("APEMIND_CHILD_RESTART_BACKOFF", "2"))
+TUNNEL_WORKERS_DEFAULT = 8
+TUNNEL_WORKERS_MAX = 32
+_HOP_HEADERS = {
+    "connection",
+    "keep-alive",
+    "proxy-authenticate",
+    "proxy-authorization",
+    "te",
+    "trailers",
+    "transfer-encoding",
+    "upgrade",
+    "host",
+    "content-length",
+}
 
 _children: dict[str, subprocess.Popen] = {}
 _ports: dict[str, int] = {}
@@ -55,18 +69,35 @@ def _api(base: str, path: str, payload: dict, timeout: float = 15) -> dict:
     return json.loads(raw.decode("utf-8"))
 
 
+def _tunnel_worker_count(raw: str | None = None) -> int:
+    value = os.environ.get("APEMIND_TUNNEL_WORKERS", "8") if raw is None else raw
+    try:
+        return max(1, min(int(value), TUNNEL_WORKERS_MAX))
+    except (TypeError, ValueError):
+        return TUNNEL_WORKERS_DEFAULT
+
+
+def _forward_headers(headers: dict | None) -> dict[str, str]:
+    outgoing: dict[str, str] = {}
+    for key, value in dict(headers or {}).items():
+        if str(key).lower() in _HOP_HEADERS:
+            continue
+        outgoing[str(key)] = str(value)
+    outgoing["Accept-Encoding"] = "identity"
+    return outgoing
+
+
 def _forward(item: dict) -> dict:
     port = _ports.get(str(item.get("agent_id") or ""))
     if not port:
         return {"id": item.get("id"), "status": 503, "headers": {}, "body": ""}
     path = item.get("path") or "/"
     url = f"http://127.0.0.1:{port}{path}"
-    headers = dict(item.get("headers") or {})
     raw_body = str(item.get("body") or "").encode("latin1")
     req = urllib.request.Request(
         url,
         data=raw_body or None,
-        headers=headers,
+        headers=_forward_headers(item.get("headers")),
         method=str(item.get("method") or "GET"),
     )
     try:
@@ -108,6 +139,22 @@ def _tunnel_loop(base: str, holder: dict) -> None:
         except Exception as exc:
             _log(f"tunnel error: {exc}")
             time.sleep(1)
+
+
+def _start_tunnel_workers(base: str, holder: dict, count: int | None = None) -> list[threading.Thread]:
+    n = _tunnel_worker_count() if count is None else max(1, count)
+    threads: list[threading.Thread] = []
+    for index in range(n):
+        thread = threading.Thread(
+            target=_tunnel_loop,
+            args=(base, holder),
+            name=f"tunnel-{index}",
+            daemon=True,
+        )
+        thread.start()
+        threads.append(thread)
+    _log(f"tunnel workers {n}")
+    return threads
 
 
 def _load_state() -> dict:
@@ -271,7 +318,7 @@ def main() -> int:
         return 0
     session = ""
     holder = {"session": ""}
-    threading.Thread(target=_tunnel_loop, args=(base, holder), daemon=True).start()
+    _start_tunnel_workers(base, holder)
     delay = POLL_SECONDS
     applied_rev: dict[str, int] = {}
     while not _shutdown:
