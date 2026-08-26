@@ -333,7 +333,18 @@ def test_frp_spec_prefers_desired_then_env(monkeypatch):
         "token": "dt",
         "port": 7001,
         "domain_suffix": "frp.internal",
+        "host_header": "",
     }
+    headed = daemon._frp_spec(
+        {
+            "frp": {
+                "server": "from-desired",
+                "token": "dt",
+                "host_header": "Computer-Staging.apemind.ai:443",
+            }
+        }
+    )
+    assert headed["host_header"] == "computer-staging.apemind.ai"
 
 
 def test_render_frpc_writes_http_proxies():
@@ -347,6 +358,19 @@ def test_render_frpc_writes_http_proxies():
     assert 'name = "cmp1-agt-a"' in body
     assert "localPort = 3080" in body
     assert 'customDomains = ["cmp1-agt-a.frp.internal"]' in body
+    assert "hostHeaderRewrite" not in body
+    rewritten = daemon._render_frpc(
+        "cmp1",
+        {
+            "server": "frp.example",
+            "port": 7000,
+            "token": "t",
+            "domain_suffix": "frp.internal",
+            "host_header": "computer-staging.apemind.ai",
+        },
+        {"agt-a": 3080},
+    )
+    assert 'hostHeaderRewrite = "computer-staging.apemind.ai"' in rewritten
 
 
 def test_sync_frpc_starts_and_reuses(tmp_path, monkeypatch):
