@@ -317,6 +317,67 @@ def test_save_state_is_owner_readable_only(tmp_path, monkeypatch):
     assert (tmp_path / "session.json").stat().st_mode & 0o777 == 0o600
 
 
+def test_frp_spec_prefers_desired_then_env(monkeypatch):
+    monkeypatch.delenv("APEMIND_FRP_SERVER", raising=False)
+    monkeypatch.delenv("APEMIND_FRP_TOKEN", raising=False)
+    assert daemon._frp_spec({}) is None
+    monkeypatch.setenv("APEMIND_FRP_SERVER", "frp.example")
+    monkeypatch.setenv("APEMIND_FRP_TOKEN", "tok")
+    spec = daemon._frp_spec({})
+    assert spec["server"] == "frp.example"
+    assert spec["token"] == "tok"
+    assert spec["port"] == 7000
+    override = daemon._frp_spec({"frp": {"server": "from-desired", "token": "dt", "port": 7001}})
+    assert override == {
+        "server": "from-desired",
+        "token": "dt",
+        "port": 7001,
+        "domain_suffix": "frp.internal",
+    }
+
+
+def test_render_frpc_writes_http_proxies():
+    body = daemon._render_frpc(
+        "cmp1",
+        {"server": 'host"x', "port": 7000, "token": "t", "domain_suffix": "frp.internal"},
+        {"agt-a": 3080},
+    )
+    assert 'serverAddr = "host\\"x"' in body
+    assert "serverPort = 7000" in body
+    assert 'name = "cmp1-agt-a"' in body
+    assert "localPort = 3080" in body
+    assert 'customDomains = ["cmp1-agt-a.frp.internal"]' in body
+
+
+def test_sync_frpc_starts_and_reuses(tmp_path, monkeypatch):
+    daemon._ports.clear()
+    daemon._ports["agt-a"] = 3080
+    daemon._frpc = None
+    daemon._frpc_key = ""
+    monkeypatch.setattr(daemon, "STATE_DIR", tmp_path)
+    monkeypatch.setattr(daemon, "FRPC_BIN", str(tmp_path / "frpc"))
+    (tmp_path / "frpc").write_text("#!/bin/sh\n")
+    (tmp_path / "frpc").chmod(0o755)
+    started = []
+
+    def _popen(cmd, stdout=None, stderr=None):
+        started.append(cmd)
+        return SimpleNamespace(poll=lambda: None, terminate=lambda: None, wait=lambda timeout: None, kill=lambda: None)
+
+    monkeypatch.setattr(daemon.subprocess, "Popen", _popen)
+    spec = {"server": "frp.example", "port": 7000, "token": "t", "domain_suffix": "frp.internal"}
+    daemon._sync_frpc("cmp1", spec)
+    daemon._sync_frpc("cmp1", spec)
+    assert len(started) == 1
+    assert started[0][0].endswith("frpc")
+    assert started[0][1] == "-c"
+    config = (tmp_path / "frpc.toml").read_text()
+    assert 'serverAddr = "frp.example"' in config
+    assert (tmp_path / "frpc.toml").stat().st_mode & 0o777 == 0o600
+    daemon._sync_frpc("cmp1", None)
+    assert daemon._frpc is None
+
+
 def test_observe_reports_stopped_after_stop():
     daemon._children.clear()
     daemon._ports.clear()

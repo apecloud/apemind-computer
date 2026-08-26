@@ -19,6 +19,21 @@ RUN npm install -g "@deepseek-ai/dsh@${DSH_VERSION}" \
 
 ENV TREADSTONE_SANDBOX_VERSION="${TREADSTONE_SANDBOX_VERSION}"
 
+ARG TARGETARCH=amd64
+ARG FRP_VERSION=0.61.1
+RUN set -euo pipefail \
+    && case "${TARGETARCH}" in \
+         amd64) frparch=amd64 ;; \
+         arm64) frparch=arm64 ;; \
+         *) echo "unsupported TARGETARCH=${TARGETARCH}" >&2; exit 1 ;; \
+       esac \
+    && curl -fsSL -o /tmp/frp.tgz \
+         "https://github.com/fatedier/frp/releases/download/v${FRP_VERSION}/frp_${FRP_VERSION}_linux_${frparch}.tar.gz" \
+    && tar -xzf /tmp/frp.tgz -C /tmp \
+    && install -m 755 "/tmp/frp_${FRP_VERSION}_linux_${frparch}/frpc" /usr/local/bin/frpc \
+    && rm -rf /tmp/frp.tgz "/tmp/frp_${FRP_VERSION}_linux_${frparch}" \
+    && frpc --version
+
 COPY run.sh /opt/gem/run.sh
 COPY entrypoint.sh /opt/gem/entrypoint.sh
 COPY supervisord.conf /opt/gem/supervisord.conf

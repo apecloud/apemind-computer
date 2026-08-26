@@ -27,6 +27,7 @@ BACKOFF_CAP = float(os.environ.get("APEMIND_BACKOFF_CAP", "60"))
 CHILD_RESTART_BACKOFF = float(os.environ.get("APEMIND_CHILD_RESTART_BACKOFF", "2"))
 TUNNEL_WORKERS_DEFAULT = 8
 TUNNEL_WORKERS_MAX = 32
+FRPC_BIN = os.environ.get("APEMIND_FRPC_BIN", "/usr/local/bin/frpc")
 _HOP_HEADERS = {
     "connection",
     "keep-alive",
@@ -50,6 +51,8 @@ _children: dict[str, subprocess.Popen] = {}
 _ports: dict[str, int] = {}
 _crash_until: dict[str, float] = {}
 _shutdown = False
+_frpc: subprocess.Popen | None = None
+_frpc_key = ""
 
 
 def _log(msg: str) -> None:
@@ -197,6 +200,104 @@ def _tunnel_loop(base: str, holder: dict) -> None:
         except Exception as exc:
             _log(f"tunnel error: {exc}")
             time.sleep(1)
+
+
+def _toml_escape(value: str) -> str:
+    return value.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def _frp_spec(desired: dict | None = None) -> dict | None:
+    block = dict((desired or {}).get("frp") or {})
+    server = str(block.get("server") or os.environ.get("APEMIND_FRP_SERVER") or "").strip()
+    token = str(block.get("token") or os.environ.get("APEMIND_FRP_TOKEN") or "").strip()
+    if not server or not token:
+        return None
+    try:
+        port = int(block.get("port") or os.environ.get("APEMIND_FRP_PORT") or 7000)
+    except (TypeError, ValueError):
+        port = 7000
+    suffix = str(
+        block.get("domain_suffix") or os.environ.get("APEMIND_FRP_DOMAIN_SUFFIX") or "frp.internal"
+    ).strip()
+    return {
+        "server": server,
+        "port": port,
+        "token": token,
+        "domain_suffix": suffix or "frp.internal",
+    }
+
+
+def _frp_domain(computer_id: str, agent_id: str, suffix: str) -> str:
+    return f"{computer_id}-{agent_id}.{suffix}"
+
+
+def _render_frpc(computer_id: str, spec: dict, ports: dict[str, int]) -> str:
+    lines = [
+        f'serverAddr = "{_toml_escape(spec["server"])}"',
+        f"serverPort = {int(spec['port'])}",
+        'auth.method = "token"',
+        f'auth.token = "{_toml_escape(spec["token"])}"',
+        "loginFailExit = false",
+    ]
+    for agent_id, port in sorted(ports.items()):
+        name = f"{computer_id}-{agent_id}"
+        domain = _frp_domain(computer_id, agent_id, spec["domain_suffix"])
+        lines.extend(
+            [
+                "",
+                "[[proxies]]",
+                f'name = "{_toml_escape(name)}"',
+                'type = "http"',
+                'localIP = "127.0.0.1"',
+                f"localPort = {int(port)}",
+                f'customDomains = ["{_toml_escape(domain)}"]',
+            ]
+        )
+    return "\n".join(lines) + "\n"
+
+
+def _stop_frpc() -> None:
+    global _frpc, _frpc_key
+    proc = _frpc
+    _frpc = None
+    _frpc_key = ""
+    if proc is None:
+        return
+    if proc.poll() is None:
+        proc.terminate()
+        try:
+            proc.wait(timeout=8)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+    _log("frpc stopped")
+
+
+def _sync_frpc(computer_id: str, spec: dict | None) -> None:
+    global _frpc, _frpc_key
+    if not computer_id or spec is None or not _ports:
+        if _frpc is not None:
+            _stop_frpc()
+        return
+    body = _render_frpc(computer_id, spec, dict(_ports))
+    if body == _frpc_key and _frpc is not None and _frpc.poll() is None:
+        return
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    config_path = STATE_DIR / "frpc.toml"
+    tmp = config_path.with_name(config_path.name + ".tmp")
+    tmp.write_text(body)
+    tmp.chmod(0o600)
+    tmp.replace(config_path)
+    _stop_frpc()
+    if not Path(FRPC_BIN).is_file():
+        _log("frpc missing; skip")
+        return
+    _frpc = subprocess.Popen(
+        [FRPC_BIN, "-c", str(config_path)],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    _frpc_key = body
+    _log(f"frpc started {spec['server']}:{spec['port']}")
 
 
 def _start_tunnel_workers(base: str, holder: dict, count: int | None = None) -> list[threading.Thread]:
@@ -375,6 +476,7 @@ def main() -> int:
             time.sleep(POLL_SECONDS)
         return 0
     session = ""
+    computer_id = ""
     holder = {"session": ""}
     _start_tunnel_workers(base, holder)
     delay = POLL_SECONDS
@@ -384,6 +486,7 @@ def main() -> int:
             if not session:
                 state = _join(base, token)
                 session = state["session_token"]
+                computer_id = str(state.get("computer_id") or "")
                 holder["session"] = session
                 _log(f"joined {state.get('computer_id')}")
             _api(base, "/api/v2/computer-control/heartbeat", {"session_token": session})
@@ -407,12 +510,15 @@ def main() -> int:
                 "/api/v2/computer-control/observed",
                 {"session_token": session, "agents": _observe(want_ids)},
             )
+            _sync_frpc(computer_id, _frp_spec(desired))
             delay = POLL_SECONDS
         except urllib.error.HTTPError as exc:
             _log(f"control error {exc.code}")
             if exc.code in (401, 404):
                 session = ""
+                computer_id = ""
                 holder["session"] = ""
+                _stop_frpc()
                 if STATE_FILE.is_file():
                     STATE_FILE.unlink()
             delay = _next_backoff(delay)
@@ -424,6 +530,7 @@ def main() -> int:
             time.sleep(min(1.0, max(0.0, deadline - time.time())))
     for agent_id in list(_children):
         _stop_agent(agent_id)
+    _stop_frpc()
     return 0
 
 
