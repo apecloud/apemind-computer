@@ -236,6 +236,8 @@ export class Supervisor {
     for (const dir of ["", "workspace", ".dsh", ".apemind", ".config", ".cache", path.join(".local", "share")]) {
       await fsp.mkdir(path.join(home, dir), { recursive: true })
     }
+    // block cross-tenant traversal regardless of uid isolation being on
+    await fsp.chmod(home, 0o700)
     const meta: InstanceMeta = { desired: "stopped", createdAt: new Date().toISOString() }
     if (this.cfg.uidBase > 0) {
       meta.uid = this.allocateUid()

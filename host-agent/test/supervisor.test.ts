@@ -15,6 +15,8 @@ test("ensure running starts dsh with the per-user environment", async () => {
     const view = await env.sup.ensure("alice", "running")
     assert.equal(view.status, "running")
     assert.ok(view.port)
+    const homeMode = fs.statSync(path.join(env.cfg.dataDir, "users", "alice")).mode & 0o777
+    assert.equal(homeMode, 0o700, "tenant home must not be world-readable")
     const probePath = path.join(env.cfg.dataDir, "users", "alice", ".apemind", "probe.json")
     const probe = JSON.parse(fs.readFileSync(probePath, "utf8"))
     assert.equal(probe.env.APEMIND_USER_ID, "alice")
