@@ -10,21 +10,53 @@ permissions:
   contents: read
 
 jobs:
-  check:
+  host-agent:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
 
-      - name: Sandbox sources are in-repo and not a remote Treadstone FROM
-        run: |
-          set -euo pipefail
-          test -f sandbox-image/Dockerfile
-          test -f sandbox-image/reconstructed/Dockerfile
-          if grep -R -n 'ghcr.io/earayu/treadstone-sandbox' sandbox-image Dockerfile 2>/dev/null; then
-            echo "sandbox image must not FROM ghcr.io/earayu/treadstone-sandbox"
-            exit 1
-          fi
-          grep -q 'FROM ubuntu:22.04' sandbox-image/reconstructed/Dockerfile
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: host-agent/package-lock.json
+
+      - name: Ticket vectors match the generator
+        run: python3 tests/vectors/generate.py --check
+
+      - name: Install
+        working-directory: host-agent
+        run: npm ci --no-fund --no-audit
+
+      - name: Typecheck
+        working-directory: host-agent
+        run: npm run typecheck
+
+      - name: Test
+        working-directory: host-agent
+        run: npm test
+
+      - name: Build bundle
+        working-directory: host-agent
+        run: npm run build
+
+  image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Docker build (no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          push: false
+          platforms: linux/amd64

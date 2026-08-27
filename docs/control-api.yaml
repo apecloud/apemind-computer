@@ -1,0 +1,159 @@
+openapi: 3.0.3
+info:
+  title: computer-host 控制 API
+  description: >
+    computer-host（多租户 dsh 托管服务）的实例生命周期控制面。
+    仅供部署内网中的控制面（如 ApeMind）调用，不对公网暴露。
+    user_id 是不透明租户标识，须匹配 ^[A-Za-z0-9_-]{1,64}$。
+  version: "1.0"
+servers:
+  - url: http://computer-host:9090
+security:
+  - controlToken: []
+paths:
+  /healthz:
+    get:
+      summary: 服务健康与容量
+      operationId: getHealth
+      responses:
+        "200":
+          description: 服务正常
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
+  /v1/instances:
+    get:
+      summary: 列出全部实例
+      operationId: listInstances
+      responses:
+        "200":
+          description: 实例列表
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [instances]
+                properties:
+                  instances:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Instance"
+  /v1/instances/{user_id}:
+    parameters:
+      - name: user_id
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: "^[A-Za-z0-9_-]{1,64}$"
+    get:
+      summary: 查询单个实例
+      operationId: getInstance
+      responses:
+        "200":
+          description: 实例状态
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Instance"
+        "404":
+          description: 实例不存在
+    put:
+      summary: 幂等 ensure（创建并设置期望状态）
+      description: >
+        实例不存在则创建（建工作区目录并落盘元数据）。desired=running 时同步启动，
+        就绪或失败后才返回。重复调用幂等。env 中的键值以环境变量注入 dsh 进程；
+        同时提供 APEMIND_API_KEY 与 APEMIND_MCP_URL 时，会渲染托管 cordis 配置，
+        让实例内的 dsh 挂载 ApeMind MCP 工具。
+      operationId: ensureInstance
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [desired]
+              properties:
+                desired:
+                  type: string
+                  enum: [running, stopped]
+                env:
+                  type: object
+                  additionalProperties:
+                    type: string
+      responses:
+        "200":
+          description: 实例当前状态
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Instance"
+        "400":
+          description: user_id 或请求体不合法
+        "409":
+          description: 实例启动失败（附错误信息）
+        "507":
+          description: 容量已满
+    delete:
+      summary: 删除实例（停止进程并清空工作区）
+      operationId: deleteInstance
+      responses:
+        "204":
+          description: 已删除
+        "404":
+          description: 实例不存在
+components:
+  securitySchemes:
+    controlToken:
+      type: http
+      scheme: bearer
+      description: 共享控制令牌 COMPUTER_CONTROL_TOKEN
+  schemas:
+    Instance:
+      type: object
+      required: [user_id, status, desired]
+      properties:
+        user_id:
+          type: string
+        status:
+          type: string
+          enum: [stopped, starting, running, error]
+        desired:
+          type: string
+          enum: [running, stopped]
+        port:
+          type: integer
+          description: 实例监听的回环端口，仅 running/starting 时有意义
+        started_at:
+          type: string
+          format: date-time
+        last_activity:
+          type: string
+          format: date-time
+        rss_bytes:
+          type: integer
+          description: 进程 RSS，仅 Linux 下提供
+        error:
+          type: string
+          description: status=error 时的原因
+    Health:
+      type: object
+      required: [version, instances]
+      properties:
+        version:
+          type: string
+        instances:
+          type: object
+          required: [total, running, max]
+          properties:
+            total:
+              type: integer
+            running:
+              type: integer
+            max:
+              type: integer
+        load1:
+          type: number
+        mem_free_bytes:
+          type: integer

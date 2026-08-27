@@ -1,0 +1,91 @@
+{
+  "secret": "vector-secret-0123456789abcdef0123456789abcdef",
+  "now": 1735689600,
+  "cases": [
+    {
+      "name": "ticket_valid",
+      "type": "ticket",
+      "token": "v1.eyJ0IjoidGlja2V0IiwidSI6InVzcl9hbGljZS0wMSIsImUiOjQxMDI0NDQ4MDAsIm4iOiI2ZjJiOWQ0MGMxZTg0YTM3In0.0b652c8a65b3b89270eb2284ce6f87f96ab221d94f4c486c1983452fc745c744",
+      "expect": {
+        "valid": true,
+        "user_id": "usr_alice-01",
+        "exp": 4102444800,
+        "nonce": "6f2b9d40c1e84a37"
+      }
+    },
+    {
+      "name": "session_valid",
+      "type": "session",
+      "token": "v1.eyJ0Ijoic2Vzc2lvbiIsInUiOiJ1c3JfYWxpY2UtMDEiLCJlIjo0MTAyNDQ0ODAwfQ.9db4cb30a28b2b9824aed1900c675db941496705222b6d79882e5e3984174469",
+      "expect": {
+        "valid": true,
+        "user_id": "usr_alice-01",
+        "exp": 4102444800
+      }
+    },
+    {
+      "name": "ticket_expired",
+      "type": "ticket",
+      "token": "v1.eyJ0IjoidGlja2V0IiwidSI6InVzcl9hbGljZS0wMSIsImUiOjk0NjY4NDgwMCwibiI6IjBlMTdjNTVhYjlkMjRmNjgifQ.741a94d8b5c8636dad5f6975dd160b0e9df80854daa4403bc86cdb6ce3b9014a",
+      "expect": {
+        "valid": false
+      }
+    },
+    {
+      "name": "ticket_bad_user_charset",
+      "type": "ticket",
+      "token": "v1.eyJ0IjoidGlja2V0IiwidSI6InVzci8uLi9ldGMiLCJlIjo0MTAyNDQ0ODAwLCJuIjoiYTFiMmMzZDRlNWY2MDcxOCJ9.70d5a9c4a4a6539ba1db9b281cbbdd5932381ba25254a3b8e389d0959cf3768b",
+      "expect": {
+        "valid": false
+      }
+    },
+    {
+      "name": "ticket_tampered_sig",
+      "type": "ticket",
+      "token": "v1.eyJ0IjoidGlja2V0IiwidSI6InVzcl9hbGljZS0wMSIsImUiOjQxMDI0NDQ4MDAsIm4iOiI2ZjJiOWQ0MGMxZTg0YTM3In0.0b652c8a65b3b89270eb2284ce6f87f96ab221d94f4c486c1983452fc745c740",
+      "expect": {
+        "valid": false
+      }
+    },
+    {
+      "name": "ticket_tampered_body",
+      "type": "ticket",
+      "token": "v1.eyJ0IjoidGlja2V0IiwidSI6InVzcl9hbGljZS0wMSIsImUiOjQxMDI0NDQ4MDAsIm4iOiI2ZjJiOWQ0MGMxZTg0YTM3IAA.0b652c8a65b3b89270eb2284ce6f87f96ab221d94f4c486c1983452fc745c744",
+      "expect": {
+        "valid": false
+      }
+    },
+    {
+      "name": "wrong_version_prefix",
+      "type": "ticket",
+      "token": "v2.eyJ0IjoidGlja2V0IiwidSI6InVzcl9hbGljZS0wMSIsImUiOjQxMDI0NDQ4MDAsIm4iOiI2ZjJiOWQ0MGMxZTg0YTM3In0.0b652c8a65b3b89270eb2284ce6f87f96ab221d94f4c486c1983452fc745c744",
+      "expect": {
+        "valid": false
+      }
+    },
+    {
+      "name": "session_used_as_ticket",
+      "type": "ticket",
+      "token": "v1.eyJ0Ijoic2Vzc2lvbiIsInUiOiJ1c3JfYWxpY2UtMDEiLCJlIjo0MTAyNDQ0ODAwfQ.9db4cb30a28b2b9824aed1900c675db941496705222b6d79882e5e3984174469",
+      "expect": {
+        "valid": false
+      }
+    },
+    {
+      "name": "ticket_used_as_session",
+      "type": "session",
+      "token": "v1.eyJ0IjoidGlja2V0IiwidSI6InVzcl9hbGljZS0wMSIsImUiOjQxMDI0NDQ4MDAsIm4iOiI2ZjJiOWQ0MGMxZTg0YTM3In0.0b652c8a65b3b89270eb2284ce6f87f96ab221d94f4c486c1983452fc745c744",
+      "expect": {
+        "valid": false
+      }
+    },
+    {
+      "name": "garbage",
+      "type": "ticket",
+      "token": "not-a-token",
+      "expect": {
+        "valid": false
+      }
+    }
+  ]
+}
