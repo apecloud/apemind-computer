@@ -1,0 +1,27 @@
+# 私有化 / 本地部署样例。生产密钥请换成随机值并通过 secret 管理。
+#
+#   docker compose -f compose.example.yml up -d
+#
+# 控制面（ApeMind）需要配置同一对密钥：
+#   COMPUTER_TICKET_SECRET / COMPUTER_CONTROL_TOKEN
+# 并把 COMPUTER_HOST_URL 指到本服务的 9090 端口。
+services:
+  computer-host:
+    image: apecloud/apemind-computer:v0.2.0
+    restart: unless-stopped
+    environment:
+      COMPUTER_TICKET_SECRET: change-me-ticket-secret
+      COMPUTER_CONTROL_TOKEN: change-me-control-token
+      # 浏览器访问网关用的对外地址（决定 Origin 校验与 cookie Secure 属性）
+      COMPUTER_PUBLIC_ORIGIN: http://127.0.0.1:18080
+      # 无会话时跳回的主站地址
+      COMPUTER_MAIN_URL: http://127.0.0.1:3000
+      COMPUTER_MAX_INSTANCES: "50"
+      COMPUTER_IDLE_TIMEOUT_SEC: "1800"
+    ports:
+      - "18080:8080" # 公网网关（生产走 Ingress/反代 + TLS）
+      - "19090:9090" # 控制 API（生产只暴露给内网控制面）
+    volumes:
+      - computer-data:/data
+volumes:
+  computer-data:

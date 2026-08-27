@@ -1,33 +1,78 @@
 # ApeMind Computer
 
-Official Computer image. The sandbox Dockerfile tree lives in this repo under `sandbox-image/` so it can be changed here. It was copied from [earayu/treadstone](https://github.com/earayu/treadstone) `deploy/sandbox-image` (Apache-2.0). Treadstone control plane is not in this repo.
+多租户 dsh（[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)）托管服务。
+一个容器内运行一个 host-agent 和 N 个 dsh 实例（每租户一个，绑定回环端口），对外提供：
 
-The image keeps browser, bash, and filesystem. It installs DeepSeek Harness (`dsh`) and bubblewrap. It does not install VS Code, Jupyter, Claude Code, Codex, Kimi CLI, or Cursor Agent.
+- **公网网关（:8080）**：短票换会话 cookie，之后按 cookie 把 HTTP/WebSocket 流量反代到
+  该租户的 dsh；转发前把 `Host` 重写为回环地址并剥掉 `Origin`/`sec-fetch-*`，dsh 的
+  回环信任门禁天然放行，dsh 本身零改动、零登录。
+- **控制 API（:9090）**：实例生命周期（ensure/status/delete）与容量健康，仅供内网
+  控制面调用。契约见 [docs/control-api.yaml](docs/control-api.yaml)。
 
-## Published images
+控制面（如 ApeMind）与本服务只共享两个密钥：签票密钥 `COMPUTER_TICKET_SECRET` 与
+控制令牌 `COMPUTER_CONTROL_TOKEN`。租户标识对本服务不透明；票据与会话格式见
+[docs/ticket-format.md](docs/ticket-format.md)，跨语言测试向量在
+[tests/vectors/](tests/vectors/)。
 
-After a tagged release:
+## 目录
 
-- `docker.io/apecloud/apemind-computer:<version>`
-- `apecloud-registry.cn-zhangjiakou.cr.aliyuncs.com/apecloud/apemind-computer:<version>`
+```
+host-agent/   Node 服务（TypeScript，零运行时依赖，esbuild 打成单文件）
+  src/        gateway / control / supervisor / ticket / config
+  test/       node:test 单元与集成测试（内置 fake dsh）
+docs/         控制 API OpenAPI 契约、票据格式
+tests/vectors 票据 golden vectors（Python 生成，双端测试共用）
+Dockerfile    运行镜像（node:22-bookworm-slim + 锁版本 dsh + host-agent）
+```
 
-## Release
+## 开发
 
-1. Push tag `vX.Y.Z`, or run **Release image** and pass `version=vX.Y.Z`.
-2. GitHub Actions builds `sandbox-image/reconstructed` from Ubuntu, then `sandbox-image`, and pushes both registries.
-3. Do not build the image on a laptop.
+```bash
+cd host-agent
+npm install
+npm run typecheck
+npm test
+npm run build        # 产出 dist/host-agent.mjs
+```
 
-## What is not in this slice
+本地起一个最小实例（需要全局安装 dsh，或用 COMPUTER_DSH_COMMAND 指向任意兼容命令）：
 
-Installing DeepSeek Harness and starting a fleet of agents. That is the next change after CI can publish this base.
+```bash
+COMPUTER_TICKET_SECRET=dev-secret \
+COMPUTER_CONTROL_TOKEN=dev-token \
+COMPUTER_PUBLIC_ORIGIN=http://127.0.0.1:8080 \
+COMPUTER_DATA_DIR=/tmp/computer-data \
+node dist/host-agent.mjs
+```
 
-## Secrets the workflow needs
+## 配置
 
-Same names as `apecloud/aperag-enterprise`:
+| 环境变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `COMPUTER_TICKET_SECRET` | 必填 | 与控制面共享的签票密钥 |
+| `COMPUTER_CONTROL_TOKEN` | 必填 | 控制 API 的 Bearer 令牌 |
+| `COMPUTER_PUBLIC_ORIGIN` | 必填 | 网关对外 Origin，用于跨站校验与 cookie Secure |
+| `COMPUTER_MAIN_URL` | `https://apemind.ai` | 无会话/无实例时跳回的主站 |
+| `COMPUTER_DATA_DIR` | `/data` | 租户工作区根目录（持久卷） |
+| `COMPUTER_GATEWAY_PORT` / `COMPUTER_CONTROL_PORT` | `8080` / `9090` | 监听端口 |
+| `COMPUTER_PORT_BASE` | `31000` | dsh 回环端口起点 |
+| `COMPUTER_MAX_INSTANCES` | `200` | 实例容量上限 |
+| `COMPUTER_IDLE_TIMEOUT_SEC` | `1800` | 闲置自动停进程（工作区保留，触达即唤醒） |
+| `COMPUTER_SESSION_TTL_SEC` | `43200` | 会话 cookie 有效期 |
+| `COMPUTER_DSH_COMMAND` | `dsh {patch} --profile web --no-open --port {port}` | 实例启动命令模板；`{patch}` 在存在托管配置时展开为 `--patch <文件>` |
+| `COMPUTER_UID_BASE` | `0`（关闭） | 每实例独立 uid 的起始值，开启需容器内 root |
+| `COMPUTER_LOOPBACK_ISOLATION` | 关闭 | 按 uid 装回环 iptables 规则，防租户串访，需 NET_ADMIN |
 
-- `DOCKERHUB_USERNAME`
-- `DOCKERHUB_TOKEN`
-- `ALIYUN_REGISTRY_USER`
-- `ALIYUN_REGISTRY_PASSWORD`
+## 镜像
 
-Grant this repository those org/repo secrets, or the publish job cannot run. Image jobs use GitHub-hosted `ubuntu-latest`.
+镜像只在 GitHub Actions 构建（推 tag `v*.*.*` 触发），不在本地构建。dsh 版本在
+Dockerfile 的 `DSH_VERSION` 中锁定，升级 dsh 一律走新镜像 tag 加回归验证。
+
+## 安全边界
+
+- 网关只信两样东西：共享密钥签出的票据/会话，以及回环上的 dsh。
+- 同容器多租户共享内核；开启 `COMPUTER_UID_BASE` 与 `COMPUTER_LOOPBACK_ISOLATION`
+  后可做到文件互不可读、回环端口互不可达，但恶意租户逃逸风险不为零，
+  更强隔离需要按租户拆 Pod/microVM。
+- 结构化 JSON 日志不落票据、cookie、API key 与对话内容；dsh 自身输出写到
+  各租户 `~/.apemind/dsh.log`。
