@@ -1,0 +1,13 @@
+publicOrigin: https://computer.example.com
+ticketSecret: ci-ticket-secret
+controlToken: ci-control-token
+mainUrl: https://app.example.com
+uidBase: 10000
+loopbackIsolation: true
+ingress:
+  enabled: true
+  className: nginx
+  tlsSecretName: computer-tls
+persistence:
+  storageClass: alicloud-disk-essd
+  size: 20Gi

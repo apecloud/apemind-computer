@@ -1,0 +1,33 @@
+# Example for taking over objects previously created by the ApeMind umbrella
+# chart. Names and selector labels must match the live Deployment; Kubernetes
+# will not let Helm change spec.selector.
+#
+# Prerequisite: annotate the PVC (and optionally other objects) with
+#   helm.sh/resource-policy=keep
+# then disable computerHost on the umbrella release so it stops owning them.
+# Install this chart with Helm 3.17+/4 `--take-ownership`.
+#
+# Do not put real secrets in this file.
+
+fullnameOverride: apemind-apemind-enterprise-computer-host
+selectorLabels:
+  app.kubernetes.io/name: apemind-enterprise
+  app.kubernetes.io/instance: apemind
+  app.kubernetes.io/component: computer-host
+
+publicOrigin: https://computer-staging.example.com
+mainUrl: https://staging.example.com
+ticketSecret: change-me
+controlToken: change-me
+
+image:
+  tag: v0.2.1
+
+persistence:
+  storageClass: alicloud-disk-essd
+  size: 100Gi
+
+ingress:
+  enabled: true
+  className: nginx
+  tlsSecretName: computer-staging-tls

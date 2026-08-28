@@ -1,0 +1,81 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "apemind-computer.fullname" . }}
+  labels:
+    {{- include "apemind-computer.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "apemind-computer.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "apemind-computer.selectorLabels" . | nindent 8 }}
+    spec:
+      automountServiceAccountToken: false
+      {{- with .Values.image.pullSecrets }}
+      imagePullSecrets:
+        {{- range . }}
+        - name: {{ . }}
+        {{- end }}
+      {{- end }}
+      containers:
+        - name: computer-host
+          image: {{ include "apemind-computer.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            - name: COMPUTER_PUBLIC_ORIGIN
+              value: {{ .Values.publicOrigin | quote }}
+            - name: COMPUTER_MAIN_URL
+              value: {{ .Values.mainUrl | quote }}
+            - name: COMPUTER_TICKET_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "apemind-computer.fullname" . }}
+                  key: ticketSecret
+            - name: COMPUTER_CONTROL_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "apemind-computer.fullname" . }}
+                  key: controlToken
+            - name: COMPUTER_MAX_INSTANCES
+              value: {{ .Values.maxInstances | quote }}
+            - name: COMPUTER_IDLE_TIMEOUT_SEC
+              value: {{ .Values.idleTimeoutSec | quote }}
+            {{- if .Values.uidBase }}
+            - name: COMPUTER_UID_BASE
+              value: {{ .Values.uidBase | quote }}
+            {{- end }}
+            {{- if .Values.loopbackIsolation }}
+            - name: COMPUTER_LOOPBACK_ISOLATION
+              value: "1"
+            {{- end }}
+          ports:
+            - name: gateway
+              containerPort: 8080
+            - name: control
+              containerPort: 9090
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          {{- if .Values.loopbackIsolation }}
+          securityContext:
+            capabilities:
+              add: ["NET_ADMIN"]
+          {{- end }}
+          readinessProbe:
+            httpGet:
+              path: /__healthz
+              port: gateway
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ include "apemind-computer.fullname" . }}-data

@@ -1,0 +1,47 @@
+# Multi-tenant hosted dsh. One replica writes instance state on the PVC.
+image:
+  repository: docker.io/apecloud/apemind-computer
+  tag: ""
+  pullPolicy: IfNotPresent
+  pullSecrets: []
+
+# Browser-facing origin, e.g. https://computer-staging.apemind.ai
+publicOrigin: ""
+# Redirect target when the gateway has no session
+mainUrl: "https://apemind.ai"
+
+# Shared with the control plane (ApeMind). Required.
+ticketSecret: ""
+controlToken: ""
+
+maxInstances: 100
+idleTimeoutSec: 1800
+# Per-instance uid isolation; 0 disables. Requires root in the container.
+uidBase: 0
+# Loopback iptables isolation between tenants. Requires NET_ADMIN and uidBase.
+loopbackIsolation: false
+
+persistence:
+  storageClass: ""
+  size: 100Gi
+
+ingress:
+  enabled: true
+  className: ""
+  tlsSecretName: ""
+  annotations: {}
+
+resources:
+  requests:
+    cpu: "1"
+    memory: "2Gi"
+  limits:
+    cpu: "8"
+    memory: "32Gi"
+
+nameOverride: ""
+fullnameOverride: ""
+# Leave empty for new installs. When adopting a Deployment created by the
+# ApeMind umbrella chart, copy the live spec.selector.matchLabels here —
+# Kubernetes will not let Helm change an existing selector.
+selectorLabels: {}
