@@ -60,3 +60,30 @@ jobs:
           file: Dockerfile
           push: false
           platforms: linux/amd64
+
+  chart:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.16.4
+
+      - name: Lint chart
+        run: helm lint deploy
+
+      - name: Render chart
+        run: helm template computer-host deploy -f deploy/ci/values-ci.yaml > /tmp/computer-host.yaml
+
+      - name: Required objects are present
+        run: |
+          set -euo pipefail
+          for kind in Secret PersistentVolumeClaim Deployment Service Ingress; do
+            grep -q "^kind: ${kind}$" /tmp/computer-host.yaml
+          done
+          grep -q "COMPUTER_TICKET_SECRET" /tmp/computer-host.yaml
+          grep -q "path: /__healthz" /tmp/computer-host.yaml

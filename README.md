@@ -22,6 +22,7 @@ host-agent/   Node 服务（TypeScript，零运行时依赖，esbuild 打成单�
   test/       node:test 单元与集成测试（内置 fake dsh）
 docs/         控制 API OpenAPI 契约、票据格式
 tests/vectors 票据 golden vectors（Python 生成，双端测试共用）
+deploy/       Kubernetes Helm chart（独立发布，不绑 ApeMind 主 chart）
 Dockerfile    运行镜像（node:22-bookworm-slim + 锁版本 dsh + host-agent）
 ```
 
@@ -67,6 +68,25 @@ node dist/host-agent.mjs
 
 镜像只在 GitHub Actions 构建（推 tag `v*.*.*` 触发），不在本地构建。dsh 版本在
 Dockerfile 的 `DSH_VERSION` 中锁定，升级 dsh 一律走新镜像 tag 加回归验证。
+
+## Kubernetes
+
+独立 Helm chart 在 `deploy/`。控制面只需要把 `COMPUTER_HOST_URL` 指到 chart 打出的
+`:9090` Service，并使用同一对 `ticketSecret` / `controlToken`。
+
+```bash
+helm upgrade --install computer-host ./deploy \
+  --namespace apemind \
+  --set publicOrigin=https://computer.example.com \
+  --set ticketSecret="$COMPUTER_TICKET_SECRET" \
+  --set controlToken="$COMPUTER_CONTROL_TOKEN"
+```
+
+从 ApeMind 主 chart 的 `computerHost` 块迁出时：先给现有 PVC 打上
+`helm.sh/resource-policy=keep`，关掉主 chart 的 `computerHost.enabled`，再用
+`values-adopt.example.yaml` 里的 `fullnameOverride` 与 `selectorLabels` 做
+`helm upgrade --install --take-ownership`，保住磁盘和工作区。Deployment 的
+selector 不能改，必须和现网一致。
 
 ## 安全边界
 

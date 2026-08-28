@@ -1,0 +1,11 @@
+computer-host {{ include "apemind-computer.fullname" . }}
+
+Gateway:  http://{{ include "apemind-computer.fullname" . }}:8080
+Control:  http://{{ include "apemind-computer.fullname" . }}:9090
+Origin:   {{ .Values.publicOrigin }}
+
+Point the control plane at the control Service and use the same
+ticketSecret / controlToken. ApeMind env:
+
+  COMPUTER_HOST_URL=http://{{ include "apemind-computer.fullname" . }}:9090
+  COMPUTER_PUBLIC_ORIGIN={{ .Values.publicOrigin }}
