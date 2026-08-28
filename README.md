@@ -7,11 +7,11 @@
   该租户的 dsh；转发前把 `Host` 重写为回环地址并剥掉 `Origin`/`sec-fetch-*`，dsh 的
   回环信任门禁天然放行，dsh 本身零改动、零登录。
 - **控制 API（:9090）**：实例生命周期（ensure/status/delete）与容量健康，仅供内网
-  控制面调用。契约见 [docs/control-api.yaml](docs/control-api.yaml)。
+  控制面调用。完整架构与契约见 [docs/architecture.md](docs/architecture.md)。
 
 控制面（如 ApeMind）与本服务只共享两个密钥：签票密钥 `COMPUTER_TICKET_SECRET` 与
-控制令牌 `COMPUTER_CONTROL_TOKEN`。租户标识对本服务不透明；票据与会话格式见
-[docs/ticket-format.md](docs/ticket-format.md)，跨语言测试向量在
+控制令牌 `COMPUTER_CONTROL_TOKEN`。租户标识对本服务不透明；票据、会话与控制 API
+见 [docs/architecture.md](docs/architecture.md) 第 5、6 节，跨语言测试向量在
 [tests/vectors/](tests/vectors/)。
 
 ## 目录
@@ -20,7 +20,7 @@
 host-agent/   Node 服务（TypeScript，零运行时依赖，esbuild 打成单文件）
   src/        gateway / control / supervisor / ticket / config
   test/       node:test 单元与集成测试（内置 fake dsh）
-docs/         控制 API OpenAPI 契约、票据格式
+docs/         架构与契约（architecture.md）
 tests/vectors 票据 golden vectors（Python 生成，双端测试共用）
 deploy/       Kubernetes Helm chart（独立发布，不绑 ApeMind 主 chart）
 Dockerfile    运行镜像（node:22-bookworm-slim + 锁版本 dsh + host-agent）
