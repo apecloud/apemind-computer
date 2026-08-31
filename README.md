@@ -9,8 +9,9 @@
 - **控制 API（:9090）**：实例生命周期（ensure/status/delete）与容量健康，仅供内网
   控制面调用。完整架构与契约见 [docs/architecture.md](docs/architecture.md)。
 
-控制面（如 ApeMind）与本服务共享签票密钥与控制令牌。今天可由环境变量预共享；
-目标是管理页一次配对后写入双方存储，见 [docs/pairing.md](docs/pairing.md)。
+控制面（如 ApeMind）与本服务共享签票密钥与控制令牌。默认在控制口自动配对
+交换后各自落盘，人不搬运密钥；环境变量预共享保留为兼容模式，见
+[docs/pairing.md](docs/pairing.md)。
 租户标识对本服务不透明；票据、会话与控制 API 见
 [docs/architecture.md](docs/architecture.md) 第 5、6 节，跨语言测试向量在
 [tests/vectors/](tests/vectors/)。

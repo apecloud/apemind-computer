@@ -1,6 +1,7 @@
 import { loadConfig } from "./config.ts"
 import { Control } from "./control.ts"
 import { Gateway } from "./gateway.ts"
+import { HostIdentity } from "./hoststate.ts"
 import { log } from "./log.ts"
 import { Supervisor } from "./supervisor.ts"
 
@@ -9,8 +10,14 @@ async function main(): Promise<void> {
   const supervisor = new Supervisor(cfg)
   await supervisor.init()
 
-  const gateway = new Gateway(cfg, supervisor)
-  const control = new Control(cfg, supervisor)
+  const identity = new HostIdentity(cfg)
+  log.info("host identity", { mode: identity.mode })
+  if (identity.mode === "unpaired") {
+    log.info("unpaired: control port accepts POST /v1/pair", { pairCodeRequired: cfg.pairCode !== "" })
+  }
+
+  const gateway = new Gateway(cfg, identity, supervisor)
+  const control = new Control(cfg, identity, supervisor)
 
   gateway.server.listen(cfg.gatewayPort, () => {
     log.info("gateway listening", { port: cfg.gatewayPort, publicOrigin: cfg.publicOrigin })

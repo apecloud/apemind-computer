@@ -1,23 +1,26 @@
-# 私有化 / 本地部署样例。生产密钥请换成随机值并通过 secret 管理。
+# 私有化 / 本地部署样例。
 #
 #   docker compose -f compose.example.yml up -d
 #
-# 控制面（ApeMind）需要配置同一对密钥：
-#   COMPUTER_TICKET_SECRET / COMPUTER_CONTROL_TOKEN
-# 并把 COMPUTER_HOST_URL 指到本服务的 9090 端口。
+# 默认走自动配对（docs/pairing.md）：本服务启动后未配对，控制面（ApeMind）
+# 配置 COMPUTER_HOST_URL 指到 9090 端口即可自动完成配对，密钥落在 /data/host.json，
+# 人不需要搬运任何密钥。控制网络里跑着不可信负载时，可设 COMPUTER_PAIR_CODE
+# （两边配同一个值）加一道门。
 services:
   computer-host:
     image: apecloud/apemind-computer:v0.2.0
     restart: unless-stopped
     environment:
-      COMPUTER_TICKET_SECRET: change-me-ticket-secret
-      COMPUTER_CONTROL_TOKEN: change-me-control-token
       # 浏览器访问网关用的对外地址（决定 Origin 校验与 cookie Secure 属性）
       COMPUTER_PUBLIC_ORIGIN: http://127.0.0.1:18080
-      # 无会话时跳回的主站地址
+      # 配对前无会话时跳回的主站地址（配对后以配对写入的 main_url 为准）
       COMPUTER_MAIN_URL: http://127.0.0.1:3000
       COMPUTER_MAX_INSTANCES: "50"
       COMPUTER_IDLE_TIMEOUT_SEC: "1800"
+      # 兼容模式：仍可用环境变量预共享两把密钥（两项必须同时设置），
+      # 设置后本服务视为已配对，不再接受 /v1/pair。
+      # COMPUTER_TICKET_SECRET: change-me-ticket-secret
+      # COMPUTER_CONTROL_TOKEN: change-me-control-token
     ports:
       - "18080:8080" # 公网网关（生产走 Ingress/反代 + TLS）
       - "19090:9090" # 控制 API（生产只暴露给内网控制面）

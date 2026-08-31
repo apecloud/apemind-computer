@@ -10,9 +10,13 @@ publicOrigin: ""
 # Redirect target when the gateway has no session
 mainUrl: "https://apemind.ai"
 
-# Shared with the control plane (ApeMind). Required.
+# Pre-shared secrets (compat mode). Leave both empty to let the host pair with
+# the control plane automatically over the control port (docs/pairing.md);
+# secrets then live on the PVC in /data/host.json.
 ticketSecret: ""
 controlToken: ""
+# Optional strict-mode bootstrap code. When set, POST /v1/pair requires it.
+pairCode: ""
 
 maxInstances: 100
 idleTimeoutSec: 1800

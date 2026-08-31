@@ -6,7 +6,7 @@
 
 ## 0. 一句话架构
 
-**computer-host 是一个独立的多租户 dsh SaaS 服务**：一个大容器 = 一个 host-agent（Node 单进程：公网网关 + 控制 OpenAPI + dsh supervisor）+ N 个 vanilla `dsh web` 进程（每租户一个，绑 127.0.0.1）。ApeMind 与它的全部关系就两条线：**给登录用户签一张短票**（用户拿票进网关）、**调它的控制 OpenAPI 启停实例**。数据路径 浏览器 → Ingress → host-agent → 回环 dsh 一跳直达，ApeMind 不在数据路径上。两套密钥从哪来、一对一约束与配对流程见 [pairing.md](pairing.md)（目标契约；落地前仍可环境变量预共享）。
+**computer-host 是一个独立的多租户 dsh SaaS 服务**：一个大容器 = 一个 host-agent（Node 单进程：公网网关 + 控制 OpenAPI + dsh supervisor）+ N 个 vanilla `dsh web` 进程（每租户一个，绑 127.0.0.1）。ApeMind 与它的全部关系就两条线：**给登录用户签一张短票**（用户拿票进网关）、**调它的控制 OpenAPI 启停实例**。数据路径 浏览器 → Ingress → host-agent → 回环 dsh 一跳直达，ApeMind 不在数据路径上。两套密钥从哪来、一对一约束与配对流程见 [pairing.md](pairing.md)（环境变量预共享保留为兼容模式）。
 
 没有 daemon、没有 FRP、没有隧道、没有 join token、没有 aperag 里的 ASGI 代理、**没有自研 dsh plugin**。
 
@@ -142,12 +142,15 @@ sequenceDiagram
 
 ## 6. ApeMind ↔ computer-host 契约（控制 OpenAPI）
 
-`:9090`，仅集群内可达。Bearer 今天是预共享的 `COMPUTER_CONTROL_TOKEN`；目标是配对后的长期控制令牌（[pairing.md](pairing.md)）。当前实例接口：
+`:9090`，仅集群内可达。Bearer 是配对换出的长期控制令牌；环境变量预共享 `COMPUTER_CONTROL_TOKEN` 保留为兼容模式（[pairing.md](pairing.md)）。接口：
 
+- `POST /v1/pair`：未配对时绑定控制面，换出长期令牌与签票密钥（唯一不要求 Bearer 的写接口，防浏览器校验见 pairing.md §5.1）。
+- `GET /v1/runtime`：未配对无鉴权回 `{state, public_origin, version}`；已配对需 Bearer，另回 `main_url` / `paired_at`。
+- `PUT /v1/runtime`：更新 `main_url`；`POST /v1/unpair`：解除配对。
 - `PUT /v1/instances/{user_id}`：幂等 ensure。body `{desired: running|stopped, env?: {APEMIND_API_KEY?...}}`。同步返回 `{status, port, started_at, last_activity}`。
 - `GET /v1/instances/{user_id}`、`GET /v1/instances`：状态（running/stopped/error、RSS、last_activity）。
 - `DELETE /v1/instances/{user_id}`：停进程 + 删工作区（重置）。
-- `GET /healthz`：容量/负载/版本；配对落地后附带 `public_origin`（见 pairing.md）。
+- `GET /healthz`：容量/负载/版本/`public_origin`。
 
 协议版本走 `/v1` 路径。实现以 `host-agent/src/control.ts` 为准。
 

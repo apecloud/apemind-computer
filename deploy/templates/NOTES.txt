@@ -4,8 +4,22 @@ Gateway:  http://{{ include "apemind-computer.fullname" . }}:8080
 Control:  http://{{ include "apemind-computer.fullname" . }}:9090
 Origin:   {{ .Values.publicOrigin }}
 
-Point the control plane at the control Service and use the same
-ticketSecret / controlToken. ApeMind env:
+{{- if trim (toString .Values.ticketSecret) }}
+
+Pre-shared mode: point the control plane at the control Service and use the
+same ticketSecret / controlToken. ApeMind env:
 
   COMPUTER_HOST_URL=http://{{ include "apemind-computer.fullname" . }}:9090
   COMPUTER_PUBLIC_ORIGIN={{ .Values.publicOrigin }}
+{{- else }}
+
+Pairing mode: the host starts unpaired and accepts POST /v1/pair on the
+control port (docs/pairing.md). Point ApeMind at the control Service and it
+pairs automatically (or click connect on the admin page):
+
+  COMPUTER_HOST_URL=http://{{ include "apemind-computer.fullname" . }}:9090
+{{- if trim (toString .Values.pairCode) }}
+
+Strict mode: pairing requires the configured pairCode.
+{{- end }}
+{{- end }}

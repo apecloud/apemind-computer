@@ -5,7 +5,7 @@ import { listen, makeEnv, TEST_CONTROL_TOKEN, type TestEnv } from "./helpers.ts"
 
 async function withControl(fn: (base: string, env: TestEnv) => Promise<void>): Promise<void> {
   const env = await makeEnv()
-  const control = new Control(env.cfg, env.sup)
+  const control = new Control(env.cfg, env.identity, env.sup)
   const port = await listen(control.server)
   try {
     await fn(`http://127.0.0.1:${port}`, env)
@@ -94,7 +94,7 @@ test("invalid bodies and user ids are rejected", async () => {
 
 test("capacity limit surfaces as 507", async () => {
   const env = await makeEnv({ COMPUTER_MAX_INSTANCES: "1" })
-  const control = new Control(env.cfg, env.sup)
+  const control = new Control(env.cfg, env.identity, env.sup)
   const port = await listen(control.server)
   const base = `http://127.0.0.1:${port}`
   try {

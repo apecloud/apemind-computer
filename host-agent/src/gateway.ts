@@ -2,6 +2,7 @@ import * as http from "node:http"
 import * as net from "node:net"
 import type { Duplex } from "node:stream"
 import type { Config } from "./config.ts"
+import type { HostIdentity } from "./hoststate.ts"
 import { log } from "./log.ts"
 import { Supervisor } from "./supervisor.ts"
 import { signToken, verifyToken, type TokenPayload } from "./ticket.ts"
@@ -62,12 +63,14 @@ function wantsHtml(req: http.IncomingMessage): boolean {
 
 export class Gateway {
   private readonly cfg: Config
+  private readonly identity: HostIdentity
   private readonly sup: Supervisor
   private readonly usedNonces = new Map<string, number>()
   readonly server: http.Server
 
-  constructor(cfg: Config, sup: Supervisor) {
+  constructor(cfg: Config, identity: HostIdentity, sup: Supervisor) {
     this.cfg = cfg
+    this.identity = identity
     this.sup = sup
     this.server = http.createServer((req, res) => {
       void this.onRequest(req, res).catch((err) => {
@@ -102,9 +105,11 @@ export class Gateway {
   }
 
   private session(req: http.IncomingMessage): TokenPayload | null {
+    const secret = this.identity.ticketSecret
+    if (secret === null) return null
     const raw = cookieValue(req.headers.cookie, SESSION_COOKIE)
     if (!raw) return null
-    return verifyToken(raw, this.cfg.ticketSecret, "session", nowSec())
+    return verifyToken(raw, secret, "session", nowSec())
   }
 
   private redirect(res: http.ServerResponse, url: string): void {
@@ -134,18 +139,18 @@ export class Gateway {
     }
     const session = this.session(req)
     if (!session) {
-      if (wantsHtml(req)) this.redirect(res, `${this.cfg.mainUrl}/workspace/computer`)
+      if (wantsHtml(req)) this.redirect(res, `${this.identity.mainUrl}/workspace/computer`)
       else this.deny(res, 401, "no computer session")
       return
     }
     const inst = this.sup.get(session.userId)
     if (!inst) {
-      if (wantsHtml(req)) this.redirect(res, `${this.cfg.mainUrl}/workspace/computer`)
+      if (wantsHtml(req)) this.redirect(res, `${this.identity.mainUrl}/workspace/computer`)
       else this.deny(res, 404, "no computer instance")
       return
     }
     if (inst.meta.desired !== "running") {
-      if (wantsHtml(req)) this.redirect(res, `${this.cfg.mainUrl}/workspace/computer`)
+      if (wantsHtml(req)) this.redirect(res, `${this.identity.mainUrl}/workspace/computer`)
       else this.deny(res, 503, "computer is stopped")
       return
     }
@@ -167,6 +172,11 @@ export class Gateway {
   }
 
   private redeemTicket(url: string, res: http.ServerResponse): void {
+    const secret = this.identity.ticketSecret
+    if (secret === null) {
+      this.deny(res, 403, "invalid or expired ticket")
+      return
+    }
     let raw: string
     try {
       raw = decodeURIComponent(url.slice("/open/".length).split("?")[0])
@@ -174,7 +184,7 @@ export class Gateway {
       this.deny(res, 403, "invalid or expired ticket")
       return
     }
-    const payload = verifyToken(raw, this.cfg.ticketSecret, "ticket", nowSec())
+    const payload = verifyToken(raw, secret, "ticket", nowSec())
     if (!payload || !payload.nonce) {
       this.deny(res, 403, "invalid or expired ticket")
       return
@@ -185,7 +195,7 @@ export class Gateway {
       return
     }
     this.usedNonces.set(nonceKey, payload.exp)
-    const sessionToken = signToken(this.cfg.ticketSecret, {
+    const sessionToken = signToken(secret, {
       type: "session",
       userId: payload.userId,
       exp: nowSec() + this.cfg.sessionTtlSec,
