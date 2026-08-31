@@ -153,7 +153,7 @@ sequenceDiagram
 
 ## 7. host-agent 行为细节
 
-- **supervisor 状态机**：`created → running ⇄ idle-stopped → deleted`，另有 `error(backoff)`。spawn 参数：`dsh web --port <31000+> --patch /etc/apemind/managed.cordis.yml`；每租户 `HOME=/data/users/<uid>`、`DSH_HOME=$HOME/.dsh`、独立 XDG；崩溃指数退避，闲置自动 stop（默认 1800s）；端口重启后重新分配（cookie 只含 user_id，与端口无关）。HOME 目录 0700。
+- **supervisor 状态机**：`created → running ⇄ idle-stopped → deleted`，另有 `error(backoff)`。spawn 命令模板 `dsh {patch} --profile web --no-open --port {port}`（`{patch}` 在租户存在 `~/.apemind/managed.cordis.yml` 时展开为 `--patch <该文件>`）；每租户 `HOME=/data/users/<key>`、`DSH_HOME=$HOME/.dsh`、独立 XDG；崩溃指数退避，闲置自动 stop（默认 1800s）；端口重启后重新分配（cookie 只含 user_id，与端口无关）。HOME 目录 0700。逐状态转换、目录所有权与数据流细节见 [lifecycle.md](lifecycle.md)。
 - **网关转发卫生**：剥 `Origin/Referer/sec-fetch-*`、`Accept-Encoding: identity`、响应加 `X-Accel-Buffering: no`；WS 重写 `Host` 后原始 socket 对拷。
 - **可观测**：结构化 JSON 日志（不落 prompt/key/文档内容），实例数/RSS/活跃度进 `/healthz`。
 
