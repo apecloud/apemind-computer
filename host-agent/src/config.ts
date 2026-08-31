@@ -65,7 +65,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     portBase: intEnv(env, "COMPUTER_PORT_BASE", 31000),
     maxInstances: intEnv(env, "COMPUTER_MAX_INSTANCES", 200),
     idleTimeoutSec: intEnv(env, "COMPUTER_IDLE_TIMEOUT_SEC", 1800),
-    sessionTtlSec: intEnv(env, "COMPUTER_SESSION_TTL_SEC", 43200),
+    sessionTtlSec: intEnv(env, "COMPUTER_SESSION_TTL_SEC", 7200),
     readyTimeoutSec: intEnv(env, "COMPUTER_READY_TIMEOUT_SEC", 90),
     stopGraceSec: intEnv(env, "COMPUTER_STOP_GRACE_SEC", 10),
     dshCommand: (env.COMPUTER_DSH_COMMAND ?? "dsh {patch} --profile web --no-open --port {port}").split(/\s+/).filter(Boolean),

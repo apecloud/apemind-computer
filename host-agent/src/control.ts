@@ -8,6 +8,7 @@ import { CapacityError, StartError, Supervisor, type Desired } from "./superviso
 import { USER_ID_RE } from "./ticket.ts"
 
 const INSTANCE_PATH_RE = /^\/v1\/instances\/([A-Za-z0-9_-]{1,64})$/
+const REVOKE_SESSIONS_PATH_RE = /^\/v1\/instances\/([A-Za-z0-9_-]{1,64})\/revoke-sessions$/
 
 function bearerValue(header: string | undefined): string | null {
   if (!header || !header.startsWith("Bearer ")) return null
@@ -219,6 +220,17 @@ export class Control {
     }
     if (req.method === "GET" && url === "/v1/instances") {
       sendJson(res, 200, { instances: this.sup.list() })
+      return
+    }
+    const revokeMatch = REVOKE_SESSIONS_PATH_RE.exec(url)
+    if (revokeMatch) {
+      if (req.method !== "POST") {
+        sendJson(res, 405, { error: "method not allowed" })
+        return
+      }
+      const view = await this.sup.revokeSessions(revokeMatch[1])
+      if (!view) sendJson(res, 404, { error: "instance not found" })
+      else sendJson(res, 200, view)
       return
     }
     const match = INSTANCE_PATH_RE.exec(url)
