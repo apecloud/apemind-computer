@@ -91,7 +91,7 @@ flowchart TB
 
 - 身份/访问控制 → 网关在 dsh 进程外完成，dsh 零登录。
 - 知识库/ApeMind 能力 → 官方 `@deepseek-ai/dsh-mcp-client` 插件（streamable-http + Bearer header），纯配置。
-- 模型接入 → 官方 provider 配置（BYOK 用户自填；平台 key 增值时注入 provider 块）。
+- 模型接入 → ApeMind 把工作区可用的 chat 模型投影成托管 provider 块（`llm-pi-ai.providers.apemind`，`baseURL` 指 ApeMind 的 OpenAI 兼容网关，Bearer 用托管 key；env 契约与渲染细节见 [lifecycle.md](lifecycle.md) §3.2）；BYOK 用户仍可自填官方 provider 配置。
 - 托管配置注入 → `dsh web --patch`：官方 patch overlay，managed 配置与用户自己的配置文件互不覆盖。
 
 不写 plugin 的理由：dsh 处于 developer preview，plugin API 会破坏性变更；给托管 dsh 加 ApeMind 能力的正确扩展点是 aperag 侧的 MCP 工具——服务端发版即所有存量实例生效。未来仅当必须改 dsh UI 本身（品牌化、内嵌账号指示器）才评估写 plugin。

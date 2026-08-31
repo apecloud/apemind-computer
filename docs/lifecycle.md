@@ -124,7 +124,12 @@ dsh {patch} --profile web --no-open --port {port}
 
 uid 隔离开启时以分配的 uid/gid 运行；stdout/stderr 进 `.apemind/dsh.log`。
 
-`managed.cordis.yml` 当前唯一内容是把官方 `@deepseek-ai/dsh-mcp-client` 插件插进配置：streamable-http 指向 `APEMIND_MCP_URL`，Authorization 头用 `!!js` 从**进程环境**读 `APEMIND_API_KEY`——密钥不落在 yaml 里，文件泄露不等于密钥泄露（`env.json` 仍含密钥本体，0600 + uid 隔离保护）。
+`managed.cordis.yml` 有两段内容，都按 env 是否齐全条件渲染：
+
+- **MCP 工具**（`APEMIND_MCP_URL` + `APEMIND_API_KEY`）：插入官方 `@deepseek-ai/dsh-mcp-client` 插件行，streamable-http 指向 MCP 地址，Authorization 头用 `!!js` 从**进程环境**读 `APEMIND_API_KEY`。
+- **模型提供方投影**（`APEMIND_LLM_BASE_URL` + `APEMIND_API_KEY` + 非空 `APEMIND_LLM_MODELS`）：在 `llm-pi-ai` 行的 config 上合并一个名为 `apemind` 的 provider（`api: openai-completions`、`baseURL` 指 ApeMind 的 OpenAI 兼容网关、`apiKeyEnv: APEMIND_API_KEY`），模型列表来自 `APEMIND_LLM_MODELS`——一个 JSON 数组，元素 `{id, name?, context_window?, vision?}`，`id` 是 ApeMind 模型 id（dsh 发起补全时原样回传，网关按它解析上游）。JSON 非法或元素缺 `id` 时 ensure 直接失败（控制面 400），不写任何文件。
+
+两段都只携带环境变量名，密钥不落在 yaml 里，文件泄露不等于密钥泄露（`env.json` 仍含密钥本体，0600 + uid 隔离保护）。patch 对 dsh 的实际生效行为按锁定的 dsh 版本在 staging 验收（与 MCP 行同一口径）。
 
 ### 3.3 再次打开 / 换人打开（实例已存在）
 
@@ -188,9 +193,12 @@ uid 隔离开启时以分配的 uid/gid 运行；stdout/stderr 进 `.apemind/dsh
 - **WebSocket**：`upgrade` 事件里手写重构握手行（同样的头卫生 + Host 改写），然后两条 socket 原始对拷；数据帧驱动活跃度 touch。
 - **进门校验**：带 `Origin` 的请求必须等于 `COMPUTER_PUBLIC_ORIGIN` 才放行（无 Origin 或 `null` 视为非跨站导航，放行）；`/open/<ticket>` 验签 + 单进程内存 nonce 防重放（60s 内复用直接 403）。
 
-### 4.2 dsh → ApeMind（MCP 回程）
+### 4.2 dsh → ApeMind（MCP 与模型回程）
 
-托管 dsh 对 ApeMind 的全部能力调用走 MCP：`managed.cordis.yml` 挂的官方 MCP 客户端插件，streamable-http 直连 `APEMIND_MCP_URL`，Bearer 是打开者的 managed key。这条是**在线 RPC**，不是文件同步——知识库内容不会被镜像进 `workspace/`。
+托管 dsh 对 ApeMind 的回程有两条，都用同一把 managed key 做 Bearer：
+
+- **MCP**：`managed.cordis.yml` 挂的官方 MCP 客户端插件，streamable-http 直连 `APEMIND_MCP_URL`。这条是**在线 RPC**，不是文件同步——知识库内容不会被镜像进 `workspace/`。
+- **模型补全**：投影的 `apemind` provider 把补全请求发到 `APEMIND_LLM_BASE_URL`（ApeMind 的 OpenAI 兼容网关 `/v1/llm`），`model` 字段是 ApeMind 模型 id；网关在 ApeMind 侧解析成真实提供方账号（base_url + 密钥）后原样透传，提供方密钥永远不进租户环境。
 
 managed key 的生命周期在 ApeMind 侧：`api_key` 表里 `is_managed=true, protected_reason="computer"` 的行，每用户至多一把活跃的，复用或按需创建；吊销/轮换只影响 MCP 回程，不影响实例进程本身。
 
@@ -200,7 +208,7 @@ managed key 的生命周期在 ApeMind 侧：`api_key` 表里 `is_managed=true, 
 | --- | --- | --- |
 | 身份 / 谁能开机 | 只在 ApeMind（登录态 + 组织成员校验）；host 只见不透明实例键 | 已有 |
 | managed API key、MCP 地址 | ApeMind → ensure env → `.apemind/` → dsh 进程环境 | 已有 |
-| 模型提供方目录 | 规划中：同一注入面投影（ApeMind 为权威，dsh 设置页在非 loopback 浏览器下本就不可用） | 未做 |
+| 模型提供方目录 | ApeMind → ensure env（`APEMIND_LLM_BASE_URL` / `APEMIND_LLM_MODELS`）→ `managed.cordis.yml` provider 行；补全流量走 ApeMind OpenAI 兼容网关（ApeMind 为权威，dsh 设置页在非 loopback 浏览器下本就不可用） | 已有 |
 | 知识库 / 检索 / 智能体工具 | dsh → MCP 在线调用 | 已有 |
 | `workspace/` 文件 | 只属于这台实例；不自动入库、不回流主站 | 恒定边界 |
 | `.dsh/` 会话与偏好 | 只属于 dsh；ApeMind 不读不写 | 恒定边界 |
@@ -224,8 +232,7 @@ managed key 的生命周期在 ApeMind 侧：`api_key` 表里 `is_managed=true, 
 ## 6. 不解决什么
 
 - 多 host 调度与租户指派（architecture.md §4 留了子域扩展位）。
-- 组织级 API key：组织实例的 MCP 身份仍跟最近一次拉起进程的操作者。
-- 模型目录投影的具体 schema 与写入格式（patch 还是 settings 片段，按锁定的 dsh 版本实测后另立文档）。
+- 组织级 API key：组织实例的 MCP 与模型回程身份仍跟最近一次拉起进程的操作者。
 - 按租户拆 Pod/microVM 的强隔离。
 - dsh 版本升级流程（镜像 tag + 回归，见 README）。
 

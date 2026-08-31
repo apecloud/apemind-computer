@@ -53,6 +53,68 @@ test("env with mcp settings renders the managed patch and passes --patch", async
   }
 })
 
+test("env with llm projection renders the apemind provider row", async () => {
+  const env = await makeEnv()
+  try {
+    await env.sup.ensure("hank", "running", {
+      APEMIND_API_KEY: "sk-test-456",
+      APEMIND_MCP_URL: "http://mcp.test/mcp",
+      APEMIND_LLM_BASE_URL: "https://main.test/v1/llm",
+      APEMIND_LLM_MODELS: JSON.stringify([
+        { id: "model0123", name: "GPT X", context_window: 131072, vision: true },
+        { id: "model0456", name: "O'Neil" },
+      ]),
+    })
+    const home = path.join(env.cfg.dataDir, "users", "hank")
+    const patch = fs.readFileSync(path.join(home, ".apemind", "managed.cordis.yml"), "utf8")
+    assert.match(patch, /dsh-mcp-client/, "mcp row must stay alongside the provider row")
+    assert.match(patch, /- id: llm-pi-ai/)
+    assert.match(patch, /baseURL: 'https:\/\/main\.test\/v1\/llm'/)
+    assert.match(patch, /apiKeyEnv: APEMIND_API_KEY/)
+    assert.match(patch, /- id: 'model0123'/)
+    assert.match(patch, /contextWindow: 131072/)
+    assert.match(patch, /input: \[text, image\]/)
+    assert.match(patch, /displayName: 'O''Neil'/, "single quotes must be yaml-escaped")
+    assert.doesNotMatch(patch, /sk-test-456/, "the key must stay out of the patch file")
+  } finally {
+    await env.cleanup()
+  }
+})
+
+test("llm projection without models keeps the provider row out of the patch", async () => {
+  const env = await makeEnv()
+  try {
+    await env.sup.ensure("iris", "running", {
+      APEMIND_API_KEY: "sk-test-789",
+      APEMIND_LLM_BASE_URL: "https://main.test/v1/llm",
+      APEMIND_LLM_MODELS: "[]",
+    })
+    const home = path.join(env.cfg.dataDir, "users", "iris")
+    assert.equal(fs.existsSync(path.join(home, ".apemind", "managed.cordis.yml")), false)
+  } finally {
+    await env.cleanup()
+  }
+})
+
+test("malformed llm model projection is rejected before anything is written", async () => {
+  const env = await makeEnv()
+  try {
+    await assert.rejects(
+      () =>
+        env.sup.ensure("judy", "stopped", {
+          APEMIND_API_KEY: "sk-test-000",
+          APEMIND_LLM_BASE_URL: "https://main.test/v1/llm",
+          APEMIND_LLM_MODELS: "not-json",
+        }),
+      /invalid env entry: APEMIND_LLM_MODELS/,
+    )
+    const home = path.join(env.cfg.dataDir, "users", "judy")
+    assert.equal(fs.existsSync(path.join(home, ".apemind", "env.json")), false)
+  } finally {
+    await env.cleanup()
+  }
+})
+
 test("crashed instance restarts automatically while desired is running", async () => {
   const env = await makeEnv()
   try {

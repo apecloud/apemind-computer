@@ -74,20 +74,88 @@ function yamlSingleQuote(value: string): string {
   return `'${value.replace(/'/g, "''")}'`
 }
 
-/** Managed cordis patch mounting the ApeMind MCP tools; the key stays in the process env. */
-function renderManagedPatch(mcpUrl: string): string {
-  return [
-    "- insert:",
-    "    - id: mcp-apemind",
-    "      name: '@deepseek-ai/dsh-mcp-client'",
-    "      config:",
-    "        serverName: apemind",
-    "        transport: streamable-http",
-    `        url: ${yamlSingleQuote(mcpUrl)}`,
-    "        headers:",
-    "          Authorization: !!js '`Bearer ${process.env.APEMIND_API_KEY}`'",
-    "",
-  ].join("\n")
+interface ManagedModel {
+  id: string
+  name?: string
+  contextWindow?: number
+  vision?: boolean
+}
+
+/** Parse the APEMIND_LLM_MODELS JSON contract. The error message must start
+ * with "invalid" so the control API maps a malformed projection to HTTP 400. */
+function parseManagedModels(raw: string): ManagedModel[] {
+  const fail = (): never => {
+    throw new Error("invalid env entry: APEMIND_LLM_MODELS")
+  }
+  let data: unknown
+  try {
+    data = JSON.parse(raw)
+  } catch {
+    return fail()
+  }
+  if (!Array.isArray(data)) return fail()
+  const models: ManagedModel[] = []
+  for (const item of data) {
+    if (item === null || typeof item !== "object" || Array.isArray(item)) return fail()
+    const record = item as Record<string, unknown>
+    if (typeof record.id !== "string" || record.id.length === 0) return fail()
+    const model: ManagedModel = { id: record.id }
+    if (typeof record.name === "string" && record.name) model.name = record.name
+    if (typeof record.context_window === "number" && Number.isFinite(record.context_window) && record.context_window > 0) {
+      model.contextWindow = Math.floor(record.context_window)
+    }
+    if (record.vision === true) model.vision = true
+    models.push(model)
+  }
+  return models
+}
+
+function renderModelProviderLines(baseUrl: string, models: ManagedModel[]): string[] {
+  const lines = [
+    "- id: llm-pi-ai",
+    "  config:",
+    "    providers:",
+    "      apemind:",
+    "        displayName: 'ApeMind'",
+    "        api: openai-completions",
+    `        baseURL: ${yamlSingleQuote(baseUrl)}`,
+    "        apiKeyEnv: APEMIND_API_KEY",
+    "        models:",
+  ]
+  for (const model of models) {
+    lines.push(`          - id: ${yamlSingleQuote(model.id)}`)
+    if (model.name) lines.push(`            displayName: ${yamlSingleQuote(model.name)}`)
+    if (model.contextWindow !== undefined) lines.push(`            contextWindow: ${model.contextWindow}`)
+    if (model.vision) lines.push("            input: [text, image]")
+  }
+  return lines
+}
+
+/** Managed cordis patch: ApeMind MCP tools plus the projected model provider.
+ * Secrets stay in the process env; the patch only carries env var names. */
+function renderManagedPatch(env: Record<string, string>): string | undefined {
+  const sections: string[] = []
+  if (env.APEMIND_MCP_URL && env.APEMIND_API_KEY) {
+    sections.push(
+      "- insert:",
+      "    - id: mcp-apemind",
+      "      name: '@deepseek-ai/dsh-mcp-client'",
+      "      config:",
+      "        serverName: apemind",
+      "        transport: streamable-http",
+      `        url: ${yamlSingleQuote(env.APEMIND_MCP_URL)}`,
+      "        headers:",
+      "          Authorization: !!js '`Bearer ${process.env.APEMIND_API_KEY}`'",
+    )
+  }
+  if (env.APEMIND_LLM_BASE_URL && env.APEMIND_API_KEY) {
+    const models = parseManagedModels(env.APEMIND_LLM_MODELS ?? "[]")
+    if (models.length > 0) {
+      sections.push(...renderModelProviderLines(env.APEMIND_LLM_BASE_URL, models))
+    }
+  }
+  if (sections.length === 0) return undefined
+  return `${sections.join("\n")}\n`
 }
 
 export class Supervisor {
@@ -282,9 +350,10 @@ export class Supervisor {
         throw new Error(`invalid env entry: ${key}`)
       }
     }
+    const patch = renderManagedPatch(env)
     await fsp.writeFile(this.envPath(inst.userId), `${JSON.stringify(env, null, 2)}\n`, { mode: 0o600 })
-    if (env.APEMIND_MCP_URL && env.APEMIND_API_KEY) {
-      await fsp.writeFile(this.patchPath(inst.userId), renderManagedPatch(env.APEMIND_MCP_URL), { mode: 0o600 })
+    if (patch !== undefined) {
+      await fsp.writeFile(this.patchPath(inst.userId), patch, { mode: 0o600 })
     } else {
       await fsp.rm(this.patchPath(inst.userId), { force: true })
     }
