@@ -6,7 +6,7 @@
 
 ## 0. 一句话架构
 
-**computer-host 是一个独立的多租户 dsh SaaS 服务**：一个大容器 = 一个 host-agent（Node 单进程：公网网关 + 控制 OpenAPI + dsh supervisor）+ N 个 vanilla `dsh web` 进程（每租户一个，绑 127.0.0.1）。ApeMind 与它的全部关系就两条线：**给登录用户签一张短票**（用户拿票进网关）、**调它的控制 OpenAPI 启停实例**。数据路径 浏览器 → Ingress → host-agent → 回环 dsh 一跳直达，ApeMind 不在数据路径上。
+**computer-host 是一个独立的多租户 dsh SaaS 服务**：一个大容器 = 一个 host-agent（Node 单进程：公网网关 + 控制 OpenAPI + dsh supervisor）+ N 个 vanilla `dsh web` 进程（每租户一个，绑 127.0.0.1）。ApeMind 与它的全部关系就两条线：**给登录用户签一张短票**（用户拿票进网关）、**调它的控制 OpenAPI 启停实例**。数据路径 浏览器 → Ingress → host-agent → 回环 dsh 一跳直达，ApeMind 不在数据路径上。两套密钥从哪来、一对一约束与配对流程见 [pairing.md](pairing.md)（目标契约；落地前仍可环境变量预共享）。
 
 没有 daemon、没有 FRP、没有隧道、没有 join token、没有 aperag 里的 ASGI 代理、**没有自研 dsh plugin**。
 
@@ -142,12 +142,12 @@ sequenceDiagram
 
 ## 6. ApeMind ↔ computer-host 契约（控制 OpenAPI）
 
-`:9090`，仅集群内可达，Bearer `COMPUTER_CONTROL_TOKEN`：
+`:9090`，仅集群内可达。Bearer 今天是预共享的 `COMPUTER_CONTROL_TOKEN`；目标是配对后的长期控制令牌（[pairing.md](pairing.md)）。当前实例接口：
 
 - `PUT /v1/instances/{user_id}`：幂等 ensure。body `{desired: running|stopped, env?: {APEMIND_API_KEY?...}}`。同步返回 `{status, port, started_at, last_activity}`。
 - `GET /v1/instances/{user_id}`、`GET /v1/instances`：状态（running/stopped/error、RSS、last_activity）。
 - `DELETE /v1/instances/{user_id}`：停进程 + 删工作区（重置）。
-- `GET /healthz`：容量/负载/版本。
+- `GET /healthz`：容量/负载/版本；配对落地后附带 `public_origin`（见 pairing.md）。
 
 协议版本走 `/v1` 路径。实现以 `host-agent/src/control.ts` 为准。
 
@@ -196,7 +196,7 @@ AIO 底座（Xvfb/Chromium/VNC/noVNC/supervisord/nginx/gem-server/tinyproxy/bubb
 ## 12. 风险与开放项
 
 - dsh developer preview 破坏性变更 → 镜像锁版本；上游 bearer 认证若落地，网关可再简化。
-- 单 host 单点：v1 接受（replicas=1 + PVC）；扩展走每 host 子域 + aperag 指派表。
+- 单 host 单点：v1 接受（replicas=1 + PVC）；扩展走每 host 子域 + aperag 指派表。每台 host 与 ApeMind 仍是一对一配对，见 pairing.md §1。
 - `--patch` overlay 的具体行为按锁定版本实测；若不支持，退化为首次创建时写入 managed 条目到用户配置。
 - 隔离等级与逃逸风险见 §9。
 - 组织 MCP 身份目前跟随打开者，没有组织级 API 密钥表。
@@ -208,5 +208,6 @@ AIO 底座（Xvfb/Chromium/VNC/noVNC/supervisord/nginx/gem-server/tinyproxy/bubb
 - 个人和组织的实例键分别是什么，谁可以打开/停止？
 - 短票和会话 cookie 各自活多久、字段是什么？
 - 控制 API 有哪些端点、鉴权是什么？
+- 密钥如何从「两处手填」换成配对交换（pairing.md）？
 - 为什么不写 dsh plugin？
 - 回环隔离要防的是哪一种串访？
