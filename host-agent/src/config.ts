@@ -1,6 +1,9 @@
 export interface Config {
+  /** Pre-shared secrets (compat mode). Empty when the host pairs via /v1/pair. */
   ticketSecret: string
   controlToken: string
+  /** Optional operator-set bootstrap code required by POST /v1/pair when non-empty. */
+  pairCode: string
   /** Public origin of the gateway, e.g. https://computer.apemind.ai */
   publicOrigin: string
   /** Where to send browsers that have no instance or no valid session. */
@@ -45,9 +48,15 @@ function requireEnv(env: NodeJS.ProcessEnv, name: string): string {
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const publicOrigin = requireEnv(env, "COMPUTER_PUBLIC_ORIGIN").replace(/\/+$/, "")
   if (!/^https?:\/\//.test(publicOrigin)) throw new Error("COMPUTER_PUBLIC_ORIGIN must start with http:// or https://")
+  const ticketSecret = (env.COMPUTER_TICKET_SECRET ?? "").trim()
+  const controlToken = (env.COMPUTER_CONTROL_TOKEN ?? "").trim()
+  if ((ticketSecret === "") !== (controlToken === "")) {
+    throw new Error("COMPUTER_TICKET_SECRET and COMPUTER_CONTROL_TOKEN must be set together or both omitted")
+  }
   return {
-    ticketSecret: requireEnv(env, "COMPUTER_TICKET_SECRET"),
-    controlToken: requireEnv(env, "COMPUTER_CONTROL_TOKEN"),
+    ticketSecret,
+    controlToken,
+    pairCode: (env.COMPUTER_PAIR_CODE ?? "").trim(),
     publicOrigin,
     mainUrl: (env.COMPUTER_MAIN_URL ?? "https://apemind.ai").replace(/\/+$/, ""),
     dataDir: env.COMPUTER_DATA_DIR ?? "/data",

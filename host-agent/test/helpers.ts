@@ -3,6 +3,7 @@ import * as os from "node:os"
 import * as path from "node:path"
 import { fileURLToPath } from "node:url"
 import { loadConfig, type Config } from "../src/config.ts"
+import { HostIdentity } from "../src/hoststate.ts"
 import { Supervisor } from "../src/supervisor.ts"
 
 const FAKE_DSH = fileURLToPath(new URL("./fake-dsh.mjs", import.meta.url))
@@ -15,6 +16,7 @@ let nextPortBase = 34000 + Math.floor(Math.random() * 8000)
 
 export interface TestEnv {
   cfg: Config
+  identity: HostIdentity
   sup: Supervisor
   cleanup: () => Promise<void>
 }
@@ -39,6 +41,7 @@ export async function makeEnv(overrides: Record<string, string> = {}): Promise<T
   await sup.init()
   return {
     cfg,
+    identity: new HostIdentity(cfg),
     sup,
     cleanup: async () => {
       await sup.shutdown()

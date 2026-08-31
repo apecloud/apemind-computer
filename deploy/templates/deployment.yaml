@@ -32,6 +32,7 @@ spec:
               value: {{ .Values.publicOrigin | quote }}
             - name: COMPUTER_MAIN_URL
               value: {{ .Values.mainUrl | quote }}
+            {{- if trim (toString .Values.ticketSecret) }}
             - name: COMPUTER_TICKET_SECRET
               valueFrom:
                 secretKeyRef:
@@ -42,6 +43,14 @@ spec:
                 secretKeyRef:
                   name: {{ include "apemind-computer.fullname" . }}
                   key: controlToken
+            {{- end }}
+            {{- if trim (toString .Values.pairCode) }}
+            - name: COMPUTER_PAIR_CODE
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "apemind-computer.fullname" . }}
+                  key: pairCode
+            {{- end }}
             - name: COMPUTER_MAX_INSTANCES
               value: {{ .Values.maxInstances | quote }}
             - name: COMPUTER_IDLE_TIMEOUT_SEC

@@ -2,7 +2,7 @@
 
 [architecture.md](architecture.md) 回答「两边怎么分工、票据长什么样、控制 API 有哪些」。本文放大其中一层：**两个独立仓库、两种部署形态（Kubernetes 与 Docker Compose）下，控制面如何第一次连上宿主、密钥存在哪、一对多怎么约束**。
 
-落地前现状：两边用环境变量预共享 `COMPUTER_TICKET_SECRET` 与 `COMPUTER_CONTROL_TOKEN`（见 architecture.md §5、§6）。本文是目标契约——密钥不再要求人搬运，配对在控制口上自动完成，结果分别写入 ApeMind 数据库和宿主磁盘。实现切换时必须保留预共享模式，避免已有部署立刻不可用。
+本文契约已在宿主侧实现（`host-agent/src/hoststate.ts` 与 `control.ts`）：密钥不要求人搬运，配对在控制口上自动完成，结果分别写入 ApeMind 数据库和宿主磁盘。两边用环境变量预共享 `COMPUTER_TICKET_SECRET` 与 `COMPUTER_CONTROL_TOKEN` 的部署继续工作（兼容模式，见 architecture.md §5、§6）。
 
 本文不是旧形态的 join token：没有用户机器上的 daemon、没有 FRP、没有隧道。配对只发生在 **ApeMind API 进程** 与 **computer-host 控制口 `:9090`** 之间。
 
@@ -278,7 +278,6 @@ sequenceDiagram
 - 不把空闲超时、uid、Ingress 证书收进配对。
 - 不在配对里交换租户模型清单或 API Key。
 - 不引入 OIDC、双向 TLS 客户端证书、或 K8s Secret 同步控制器作为前置。
-- 本文是契约设计；在 `host-agent` 与 ApeMind `domains/computer` 落地并保留预共享兼容之前，现网仍按环境变量共享密钥运行。
 
 ## 读完后能回答的问题
 

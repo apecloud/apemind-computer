@@ -28,7 +28,7 @@ function cookieFromResponse(res: Response): string {
 
 async function withGateway(fn: (base: string, env: TestEnv) => Promise<void>): Promise<void> {
   const env = await makeEnv()
-  const gateway = new Gateway(env.cfg, env.sup)
+  const gateway = new Gateway(env.cfg, env.identity, env.sup)
   const port = await listen(gateway.server)
   try {
     await fn(`http://127.0.0.1:${port}`, env)

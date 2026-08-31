@@ -2,18 +2,30 @@ import { timingSafeEqual } from "node:crypto"
 import * as http from "node:http"
 import * as os from "node:os"
 import type { Config } from "./config.ts"
+import { AlreadyPairedError, HostIdentity, NotFilePairedError } from "./hoststate.ts"
 import { log } from "./log.ts"
 import { CapacityError, StartError, Supervisor, type Desired } from "./supervisor.ts"
 import { USER_ID_RE } from "./ticket.ts"
 
 const INSTANCE_PATH_RE = /^\/v1\/instances\/([A-Za-z0-9_-]{1,64})$/
 
-function tokenMatches(header: string | undefined, expected: string): boolean {
-  if (!header || !header.startsWith("Bearer ")) return false
-  const provided = Buffer.from(header.slice("Bearer ".length), "utf8")
-  const wanted = Buffer.from(expected, "utf8")
-  if (provided.length !== wanted.length) return false
-  return timingSafeEqual(provided, wanted)
+function bearerValue(header: string | undefined): string | null {
+  if (!header || !header.startsWith("Bearer ")) return null
+  return header.slice("Bearer ".length)
+}
+
+function secretEquals(provided: string, expected: string): boolean {
+  const a = Buffer.from(provided, "utf8")
+  const b = Buffer.from(expected, "utf8")
+  if (a.length !== b.length) return false
+  return timingSafeEqual(a, b)
+}
+
+function tokenMatches(header: string | undefined, expected: string | null): boolean {
+  if (expected === null) return false
+  const provided = bearerValue(header)
+  if (provided === null) return false
+  return secretEquals(provided, expected)
 }
 
 function sendJson(res: http.ServerResponse, status: number, body: unknown): void {
@@ -33,13 +45,29 @@ async function readJsonBody(req: http.IncomingMessage): Promise<unknown> {
   return JSON.parse(Buffer.concat(chunks).toString("utf8"))
 }
 
+function parseHttpUrl(value: unknown): string | null {
+  if (typeof value !== "string") return null
+  const text = value.trim().replace(/\/+$/, "")
+  if (text === "") return null
+  let parsed: URL
+  try {
+    parsed = new URL(text)
+  } catch {
+    return null
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null
+  return text
+}
+
 export class Control {
   private readonly cfg: Config
+  private readonly identity: HostIdentity
   private readonly sup: Supervisor
   readonly server: http.Server
 
-  constructor(cfg: Config, sup: Supervisor) {
+  constructor(cfg: Config, identity: HostIdentity, sup: Supervisor) {
     this.cfg = cfg
+    this.identity = identity
     this.sup = sup
     this.server = http.createServer((req, res) => {
       void this.onRequest(req, res).catch((err) => {
@@ -50,16 +78,139 @@ export class Control {
     })
   }
 
+  private runtimeView(): Record<string, unknown> {
+    const view: Record<string, unknown> = {
+      state: this.identity.isPaired ? "paired" : "unpaired",
+      public_origin: this.cfg.publicOrigin,
+      version: this.cfg.version,
+    }
+    if (this.identity.isPaired) {
+      view.main_url = this.identity.mainUrl
+      if (this.identity.pairedAt) view.paired_at = this.identity.pairedAt
+    }
+    return view
+  }
+
+  private async handlePair(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    if (this.identity.isPaired) {
+      sendJson(res, 409, { error: "already paired" })
+      return
+    }
+    // Pairing callers are server-side processes; a present Origin header means a
+    // browser is being used to reach the private control port (CSRF / DNS
+    // rebinding), so reject it outright. Strict JSON content-type closes the
+    // form-post variant of the same attack.
+    if (req.headers.origin !== undefined) {
+      sendJson(res, 403, { error: "origin header not allowed" })
+      return
+    }
+    const contentType = (req.headers["content-type"] ?? "").toLowerCase()
+    if (!contentType.startsWith("application/json")) {
+      sendJson(res, 403, { error: "content-type must be application/json" })
+      return
+    }
+    if (this.cfg.pairCode !== "") {
+      const provided = bearerValue(req.headers.authorization)
+      if (provided === null || !secretEquals(provided, this.cfg.pairCode)) {
+        sendJson(res, 401, { error: "pair code required" })
+        return
+      }
+    }
+    let body: unknown
+    try {
+      body = await readJsonBody(req)
+    } catch {
+      sendJson(res, 400, { error: "invalid json body" })
+      return
+    }
+    const mainUrl = parseHttpUrl((body as Record<string, unknown>)?.main_url)
+    if (mainUrl === null) {
+      sendJson(res, 400, { error: "main_url must be an http(s) URL" })
+      return
+    }
+    let info
+    try {
+      info = this.identity.pair(mainUrl)
+    } catch (err) {
+      if (err instanceof AlreadyPairedError) {
+        sendJson(res, 409, { error: "already paired" })
+        return
+      }
+      throw err
+    }
+    log.info("paired with control plane", { peer: req.socket.remoteAddress ?? "", main_url: mainUrl })
+    sendJson(res, 200, {
+      public_origin: this.cfg.publicOrigin,
+      control_token: info.controlToken,
+      ticket_secret: info.ticketSecret,
+      paired_at: info.pairedAt,
+    })
+  }
+
   private async onRequest(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
-    if (!tokenMatches(req.headers.authorization, this.cfg.controlToken)) {
+    const url = (req.url ?? "/").split("?")[0]
+    if (req.method === "POST" && url === "/v1/pair") {
+      await this.handlePair(req, res)
+      return
+    }
+    if (req.method === "GET" && url === "/v1/runtime" && !this.identity.isPaired) {
+      // Nothing here is secret; lets the control plane show the origin it is
+      // about to bind before confirming the pair.
+      sendJson(res, 200, this.runtimeView())
+      return
+    }
+    if (!tokenMatches(req.headers.authorization, this.identity.controlToken)) {
       sendJson(res, 401, { error: "unauthorized" })
       return
     }
-    const url = (req.url ?? "/").split("?")[0]
+    if (req.method === "GET" && url === "/v1/runtime") {
+      sendJson(res, 200, this.runtimeView())
+      return
+    }
+    if (req.method === "PUT" && url === "/v1/runtime") {
+      let body: unknown
+      try {
+        body = await readJsonBody(req)
+      } catch {
+        sendJson(res, 400, { error: "invalid json body" })
+        return
+      }
+      const mainUrl = parseHttpUrl((body as Record<string, unknown>)?.main_url)
+      if (mainUrl === null) {
+        sendJson(res, 400, { error: "main_url must be an http(s) URL" })
+        return
+      }
+      try {
+        this.identity.setMainUrl(mainUrl)
+      } catch (err) {
+        if (err instanceof NotFilePairedError) {
+          sendJson(res, 409, { error: err.message })
+          return
+        }
+        throw err
+      }
+      sendJson(res, 200, this.runtimeView())
+      return
+    }
+    if (req.method === "POST" && url === "/v1/unpair") {
+      try {
+        this.identity.unpair()
+      } catch (err) {
+        if (err instanceof NotFilePairedError) {
+          sendJson(res, 409, { error: err.message })
+          return
+        }
+        throw err
+      }
+      log.info("unpaired from control plane", { peer: req.socket.remoteAddress ?? "" })
+      sendJson(res, 200, this.runtimeView())
+      return
+    }
     if (req.method === "GET" && url === "/healthz") {
       const counts = this.sup.counts()
       sendJson(res, 200, {
         version: this.cfg.version,
+        public_origin: this.cfg.publicOrigin,
         instances: { total: counts.total, running: counts.running, max: this.cfg.maxInstances },
         load1: os.loadavg()[0],
         mem_free_bytes: os.freemem(),
