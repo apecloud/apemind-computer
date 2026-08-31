@@ -179,6 +179,7 @@ uid 隔离开启时以分配的 uid/gid 运行；stdout/stderr 进 `.apemind/dsh
 | 点「停止」 | `POST /api/v2/computer/stop` | 先 `GET`，存在才 `PUT` desired=stopped | 停进程，desired 落盘 |
 | 管理员「校验连接」 | 后台配置页 probe | `GET /healthz` | 返回 version、实例计数/上限、load1、空闲内存 |
 | 重置租户（无产品入口） | 运维直调 | `DELETE /v1/instances/{key}` | 停进程 + 删 HOME，204 |
+| 撤权（移出成员/改角色/停用组织） | 事务成功后 best-effort 调用 | `POST /v1/instances/{key}/revoke-sessions` | 会话代数 +1 落盘，存量会话 cookie 全部失效 |
 
 鉴权全部是 `Authorization: Bearer $COMPUTER_CONTROL_TOKEN`（常量时间比较）。错误映射：401 未认证、400 参数/实例键非法、404 实例不存在、409 启动失败（StartError）、507 容量满（实例数达 `COMPUTER_MAX_INSTANCES`或端口耗尽）。ApeMind 侧把非 200 统一包装成 ComputerHostErrorException 冒给前端。
 
@@ -221,7 +222,7 @@ managed key 的生命周期在 ApeMind 侧：`api_key` 表里 `is_managed=true, 
 | `COMPUTER_IDLE_TIMEOUT_SEC` | 1800 | 无流量多久停进程（0 关闭回收）；扫描周期固定 60s |
 | `COMPUTER_READY_TIMEOUT_SEC` | 90 | 冷启动就绪窗口；探测间隔 300ms |
 | `COMPUTER_STOP_GRACE_SEC` | 10 | SIGTERM 后宽限，超时 SIGKILL |
-| `COMPUTER_SESSION_TTL_SEC` | 43200（12h） | 会话 cookie 寿命 |
+| `COMPUTER_SESSION_TTL_SEC` | 7200（2h） | 会话 cookie 寿命；实例被 `revoke-sessions` 后立刻整体失效 |
 | 短票 TTL | 60s（ApeMind 侧常量） | `/open/<ticket>` 兑换窗口，一次性 |
 | `COMPUTER_PORT_BASE` / `COMPUTER_MAX_INSTANCES` | 31000 / 200 | 回环端口段与容量上限 |
 | `COMPUTER_UID_BASE` / `COMPUTER_LOOPBACK_ISOLATION` | 0（关）/ 关 | 每实例 uid 与回环 iptables 隔离；staging 开启（uidBase=20000） |

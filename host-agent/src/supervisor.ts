@@ -15,6 +15,9 @@ interface InstanceMeta {
   desired: Desired
   createdAt: string
   uid?: number
+  /** Bumped by revokeSessions; gateway sessions minted for an older value
+   * stop verifying, so a control-plane revoke kicks every live cookie. */
+  sessionGeneration?: number
 }
 
 interface Instance {
@@ -242,6 +245,20 @@ export class Supervisor {
   touch(userId: string): void {
     const inst = this.instances.get(userId)
     if (inst) inst.lastActivity = new Date()
+  }
+
+  sessionGeneration(userId: string): number {
+    return this.instances.get(userId)?.meta.sessionGeneration ?? 0
+  }
+
+  /** Invalidate every outstanding gateway session for one instance. */
+  async revokeSessions(userId: string): Promise<InstanceView | undefined> {
+    const inst = this.instances.get(userId)
+    if (!inst) return undefined
+    inst.meta.sessionGeneration = (inst.meta.sessionGeneration ?? 0) + 1
+    await this.persistMeta(inst)
+    log.info("sessions revoked", { user: userId, generation: inst.meta.sessionGeneration })
+    return this.view(inst)
   }
 
   async ensure(userId: string, desired: Desired, env?: Record<string, string>): Promise<InstanceView> {

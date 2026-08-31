@@ -64,6 +64,27 @@ test("instance lifecycle over the control api", async () => {
   })
 })
 
+test("revoke-sessions bumps the generation over the control api", async () => {
+  await withControl(async (base, env) => {
+    const missing = await fetch(`${base}/v1/instances/alice/revoke-sessions`, { method: "POST", headers: AUTH })
+    assert.equal(missing.status, 404)
+
+    await env.sup.ensure("alice", "stopped")
+    assert.equal(env.sup.sessionGeneration("alice"), 0)
+
+    const unauth = await fetch(`${base}/v1/instances/alice/revoke-sessions`, { method: "POST" })
+    assert.equal(unauth.status, 401)
+    const wrongMethod = await fetch(`${base}/v1/instances/alice/revoke-sessions`, { headers: AUTH })
+    assert.equal(wrongMethod.status, 405)
+
+    const ok = await fetch(`${base}/v1/instances/alice/revoke-sessions`, { method: "POST", headers: AUTH })
+    assert.equal(ok.status, 200)
+    const view = (await ok.json()) as Record<string, unknown>
+    assert.equal(view.user_id, "alice")
+    assert.equal(env.sup.sessionGeneration("alice"), 1)
+  })
+})
+
 test("invalid bodies and user ids are rejected", async () => {
   await withControl(async (base) => {
     const badDesired = await fetch(`${base}/v1/instances/alice`, {

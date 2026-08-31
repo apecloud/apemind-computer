@@ -150,6 +150,7 @@ sequenceDiagram
 - `PUT /v1/instances/{user_id}`：幂等 ensure。body `{desired: running|stopped, env?: {APEMIND_API_KEY?...}}`。同步返回 `{status, port, started_at, last_activity}`。
 - `GET /v1/instances/{user_id}`、`GET /v1/instances`：状态（running/stopped/error、RSS、last_activity）。
 - `DELETE /v1/instances/{user_id}`：停进程 + 删工作区（重置）。
+- `POST /v1/instances/{user_id}/revoke-sessions`：会话代数 +1，立刻废掉该实例全部存量网关会话（成员被移出组织等撤权场景由控制面调用；被踢的合法用户重新 open 即恢复）。
 - `GET /healthz`：容量/负载/版本/`public_origin`。
 
 协议版本走 `/v1` 路径。实现以 `host-agent/src/control.ts` 为准。

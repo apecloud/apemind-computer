@@ -149,6 +149,11 @@ export class Gateway {
       else this.deny(res, 404, "no computer instance")
       return
     }
+    if ((session.generation ?? 0) !== (inst.meta.sessionGeneration ?? 0)) {
+      if (wantsHtml(req)) this.redirect(res, `${this.identity.mainUrl}/workspace/computer`)
+      else this.deny(res, 401, "computer session revoked")
+      return
+    }
     if (inst.meta.desired !== "running") {
       if (wantsHtml(req)) this.redirect(res, `${this.identity.mainUrl}/workspace/computer`)
       else this.deny(res, 503, "computer is stopped")
@@ -199,6 +204,7 @@ export class Gateway {
       type: "session",
       userId: payload.userId,
       exp: nowSec() + this.cfg.sessionTtlSec,
+      generation: this.sup.sessionGeneration(payload.userId),
     })
     const attrs = [
       `${SESSION_COOKIE}=${sessionToken}`,
@@ -277,6 +283,10 @@ export class Gateway {
     const inst = this.sup.get(session.userId)
     if (!inst || inst.meta.desired !== "running") {
       denyRaw(403, "computer is not running")
+      return
+    }
+    if ((session.generation ?? 0) !== (inst.meta.sessionGeneration ?? 0)) {
+      denyRaw(403, "computer session revoked")
       return
     }
     if (inst.status !== "running") {

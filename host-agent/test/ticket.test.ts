@@ -1,4 +1,5 @@
 import assert from "node:assert/strict"
+import { createHmac } from "node:crypto"
 import * as fs from "node:fs"
 import { test } from "node:test"
 import { fileURLToPath } from "node:url"
@@ -44,4 +45,32 @@ test("node sign/verify roundtrip matches the vector algorithm", () => {
   assert.equal(verifyToken(token, "s3cret", "session", now), null)
   assert.equal(verifyToken(token, "other-secret", "ticket", now), null)
   assert.equal(verifyToken(token, "s3cret", "ticket", now + 61), null)
+})
+
+test("session generation roundtrips and legacy sessions default to generation 0", () => {
+  const now = 1_000_000
+  const withGen = signToken("s3cret", { type: "session", userId: "user_1", exp: now + 60, generation: 3 })
+  const payload = verifyToken(withGen, "s3cret", "session", now)
+  assert.ok(payload)
+  assert.equal(payload.generation, 3)
+
+  // Cookies minted before the generation field existed keep verifying as g=0.
+  const legacy = signToken("s3cret", { type: "session", userId: "user_1", exp: now + 60 })
+  const legacyPayload = verifyToken(legacy, "s3cret", "session", now)
+  assert.ok(legacyPayload)
+  assert.equal(legacyPayload.generation, 0)
+
+  const ticket = signToken("s3cret", { type: "ticket", userId: "user_1", exp: now + 60, nonce: "abcd" })
+  const ticketPayload = verifyToken(ticket, "s3cret", "ticket", now)
+  assert.ok(ticketPayload)
+  assert.equal(ticketPayload.generation, undefined)
+})
+
+test("malformed generation values are rejected", () => {
+  const now = 1_000_000
+  for (const g of [-1, 1.5, "2", null, {}]) {
+    const body = Buffer.from(JSON.stringify({ t: "session", u: "user_1", e: now + 60, g }), "utf8").toString("base64url")
+    const mac = createHmac("sha256", "s3cret").update(body, "ascii").digest("hex")
+    assert.equal(verifyToken(`v1.${body}.${mac}`, "s3cret", "session", now), null, `g=${JSON.stringify(g)}`)
+  }
 })

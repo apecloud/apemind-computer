@@ -7,6 +7,11 @@ export interface TokenPayload {
   userId: string
   exp: number
   nonce?: string
+  /** Session generation (`g`): sessions are valid only while it matches the
+   * instance's current generation, so bumping the instance kills every
+   * outstanding cookie. Tickets never carry it; legacy sessions without the
+   * field verify as generation 0. */
+  generation?: number
 }
 
 export const USER_ID_RE = /^[A-Za-z0-9_-]{1,64}$/
@@ -36,17 +41,22 @@ export function verifyToken(token: string, secret: string, expected: TokenType, 
   if (typeof record.u !== "string" || !USER_ID_RE.test(record.u)) return null
   if (typeof record.e !== "number" || !Number.isInteger(record.e) || record.e <= nowSec) return null
   if (expected === "ticket" && (typeof record.n !== "string" || record.n.length === 0)) return null
+  if (record.g !== undefined && (typeof record.g !== "number" || !Number.isInteger(record.g) || record.g < 0)) {
+    return null
+  }
   return {
     type: expected,
     userId: record.u,
     exp: record.e,
     nonce: typeof record.n === "string" ? record.n : undefined,
+    generation: expected === "session" ? (typeof record.g === "number" ? record.g : 0) : undefined,
   }
 }
 
 export function signToken(secret: string, payload: TokenPayload): string {
   const record: Record<string, unknown> = { t: payload.type, u: payload.userId, e: payload.exp }
   if (payload.nonce !== undefined) record.n = payload.nonce
+  if (payload.generation !== undefined) record.g = payload.generation
   const body = Buffer.from(JSON.stringify(record), "utf8").toString("base64url")
   return `v1.${body}.${hmacHex(secret, body)}`
 }

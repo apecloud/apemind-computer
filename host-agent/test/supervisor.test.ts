@@ -166,6 +166,7 @@ test("state survives a supervisor restart via meta.json", async () => {
   const env = await makeEnv()
   try {
     await env.sup.ensure("grace", "running")
+    await env.sup.revokeSessions("grace")
     await env.sup.shutdown()
 
     const { Supervisor } = await import("../src/supervisor.ts")
@@ -175,6 +176,7 @@ test("state survives a supervisor restart via meta.json", async () => {
     assert.ok(view)
     assert.equal(view.status, "stopped")
     assert.equal(view.desired, "running")
+    assert.equal(sup2.sessionGeneration("grace"), 1, "session generation must survive restarts")
     const woken = await sup2.wake("grace")
     assert.equal(woken?.status, "running")
     await sup2.shutdown()

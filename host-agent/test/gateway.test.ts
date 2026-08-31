@@ -195,6 +195,75 @@ test("websocket upgrade reaches dsh with rewritten host and echoes data", async 
   })
 })
 
+test("revoking sessions kills live cookies until the user reopens", async () => {
+  await withGateway(async (base, env) => {
+    await env.sup.ensure("alice", "running")
+    const cookie = cookieFromResponse(await fetch(`${base}/open/${mintTicket("alice")}`, { redirect: "manual" }))
+    assert.equal((await fetch(`${base}/whoami`, { headers: { cookie } })).status, 200)
+
+    const view = await env.sup.revokeSessions("alice")
+    assert.ok(view)
+
+    const xhr = await fetch(`${base}/whoami`, { headers: { cookie } })
+    assert.equal(xhr.status, 401)
+    const nav = await fetch(`${base}/`, { redirect: "manual", headers: { cookie, accept: "text/html" } })
+    assert.equal(nav.status, 302)
+    assert.match(nav.headers.get("location") ?? "", /^http:\/\/main\.test\//)
+
+    // A fresh open (RBAC re-checked control-plane side) mints a working cookie.
+    const fresh = cookieFromResponse(await fetch(`${base}/open/${mintTicket("alice")}`, { redirect: "manual" }))
+    assert.equal((await fetch(`${base}/whoami`, { headers: { cookie: fresh } })).status, 200)
+    // ...and the revoked cookie stays dead.
+    assert.equal((await fetch(`${base}/whoami`, { headers: { cookie } })).status, 401)
+  })
+})
+
+test("legacy cookies without a generation stay valid until the first revoke", async () => {
+  await withGateway(async (base, env) => {
+    await env.sup.ensure("alice", "running")
+    const legacy = signToken(TEST_SECRET, { type: "session", userId: "alice", exp: nowSec() + 600 })
+    const headers = { cookie: `${SESSION_COOKIE}=${legacy}` }
+    assert.equal((await fetch(`${base}/whoami`, { headers })).status, 200)
+    await env.sup.revokeSessions("alice")
+    assert.equal((await fetch(`${base}/whoami`, { headers })).status, 401)
+  })
+})
+
+test("websocket upgrade with a revoked session is rejected", async () => {
+  await withGateway(async (base, env) => {
+    await env.sup.ensure("alice", "running")
+    const cookie = cookieFromResponse(await fetch(`${base}/open/${mintTicket("alice")}`, { redirect: "manual" }))
+    await env.sup.revokeSessions("alice")
+    const port = Number.parseInt(new URL(base).port, 10)
+    const socket = net.connect({ host: "127.0.0.1", port })
+    const status = await new Promise<number>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("timeout")), 5000)
+      socket.on("connect", () => {
+        socket.write(
+          [
+            "GET /api/events.mux HTTP/1.1",
+            "Host: computer.test",
+            "Connection: Upgrade",
+            "Upgrade: websocket",
+            "Sec-WebSocket-Version: 13",
+            "Sec-WebSocket-Key: AAAA",
+            `Cookie: ${cookie}`,
+            "",
+            "",
+          ].join("\r\n"),
+        )
+      })
+      socket.on("data", (chunk) => {
+        clearTimeout(timer)
+        resolve(Number.parseInt(chunk.toString("latin1").split(" ")[1], 10))
+      })
+      socket.on("error", reject)
+    })
+    socket.destroy()
+    assert.equal(status, 403)
+  })
+})
+
 test("websocket upgrade without a session is rejected", async () => {
   await withGateway(async (base, env) => {
     await env.sup.ensure("alice", "running")
