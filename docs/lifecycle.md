@@ -1,6 +1,6 @@
 # dsh 生命周期与数据流
 
-[architecture.md](architecture.md) 回答「computer-host 是什么、边界在哪、契约长什么样」。本文放大其中一层：**一台托管 dsh 从无到有、从活跃到休眠再到删除，每一步谁触发、host-agent 做了什么、磁盘上留下什么**。所有行为以 `host-agent/src/`（supervisor / gateway / control）与 ApeMind 侧 `aperag/domains/computer/` 的当前实现为准；默认参数来自 `host-agent/src/config.ts`。
+[architecture.md](architecture.md) 回答「computer-host 是什么、边界在哪、契约长什么样」。[pairing.md](pairing.md) 回答控制面如何第一次连上宿主、密钥存在哪。本文放大其中一层：**一台托管 dsh 从无到有、从活跃到休眠再到删除，每一步谁触发、host-agent 做了什么、磁盘上留下什么**。所有行为以 `host-agent/src/`（supervisor / gateway / control）与 ApeMind 侧 `aperag/domains/computer/` 的当前实现为准；默认参数来自 `host-agent/src/config.ts`。
 
 心智模型：把每个实例当成一台 **scale-to-zero 的数据库实例**——存储（租户 HOME 目录）常驻在 PVC 上，计算（`dsh web` 进程）按需拉起、闲置回收；唤醒靠流量触达，不靠常驻心跳。
 
@@ -231,7 +231,7 @@ managed key 的生命周期在 ApeMind 侧：`api_key` 表里 `is_managed=true, 
 
 ## 6. 不解决什么
 
-- 多 host 调度与租户指派（architecture.md §4 留了子域扩展位）。
+- 多 host 调度与租户指派（architecture.md §4 留了子域扩展位；每台 host 的配对见 pairing.md）。
 - 组织级 API key：组织实例的 MCP 与模型回程身份仍跟最近一次拉起进程的操作者。
 - 按租户拆 Pod/microVM 的强隔离。
 - dsh 版本升级流程（镜像 tag + 回归，见 README）。
