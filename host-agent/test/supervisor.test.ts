@@ -72,10 +72,32 @@ test("env with llm projection renders the apemind provider row", async () => {
     assert.match(patch, /baseURL: 'https:\/\/main\.test\/v1\/llm'/)
     assert.match(patch, /apiKeyEnv: APEMIND_API_KEY/)
     assert.match(patch, /- id: 'model0123'/)
+    assert.match(patch, /name: 'GPT X'/)
     assert.match(patch, /contextWindow: 131072/)
     assert.match(patch, /input: \[text, image\]/)
-    assert.match(patch, /displayName: 'O''Neil'/, "single quotes must be yaml-escaped")
+    assert.match(patch, /name: 'O''Neil'/, "single quotes must be yaml-escaped")
+    assert.match(patch, /displayName: 'ApeMind'/)
+    assert.doesNotMatch(patch, /displayName: 'GPT X'/)
     assert.doesNotMatch(patch, /sk-test-456/, "the key must stay out of the patch file")
+  } finally {
+    await env.cleanup()
+  }
+})
+
+test("start rewrites a stale managed patch from env.json", async () => {
+  const env = await makeEnv()
+  try {
+    await env.sup.ensure("kate", "stopped", {
+      APEMIND_API_KEY: "sk-test-stale",
+      APEMIND_LLM_BASE_URL: "https://main.test/v1/llm",
+      APEMIND_LLM_MODELS: JSON.stringify([{ id: "model0123", name: "GPT X" }]),
+    })
+    const patchPath = path.join(env.cfg.dataDir, "users", "kate", ".apemind", "managed.cordis.yml")
+    fs.writeFileSync(patchPath, "stale: true\n")
+    await env.sup.ensure("kate", "running")
+    const patch = fs.readFileSync(patchPath, "utf8")
+    assert.match(patch, /name: 'GPT X'/)
+    assert.doesNotMatch(patch, /stale/)
   } finally {
     await env.cleanup()
   }

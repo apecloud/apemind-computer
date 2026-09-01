@@ -127,7 +127,7 @@ uid 隔离开启时以分配的 uid/gid 运行；stdout/stderr 进 `.apemind/dsh
 `managed.cordis.yml` 有两段内容，都按 env 是否齐全条件渲染：
 
 - **MCP 工具**（`APEMIND_MCP_URL` + `APEMIND_API_KEY`）：插入官方 `@deepseek-ai/dsh-mcp-client` 插件行，streamable-http 指向 MCP 地址，Authorization 头用 `!!js` 从**进程环境**读 `APEMIND_API_KEY`。
-- **模型提供方投影**（`APEMIND_LLM_BASE_URL` + `APEMIND_API_KEY` + 非空 `APEMIND_LLM_MODELS`）：在 `llm-pi-ai` 行的 config 上合并一个名为 `apemind` 的 provider（`api: openai-completions`、`baseURL` 指 ApeMind 的 OpenAI 兼容网关、`apiKeyEnv: APEMIND_API_KEY`），模型列表来自 `APEMIND_LLM_MODELS`——一个 JSON 数组，元素 `{id, name?, context_window?, vision?}`，`id` 是 ApeMind 模型 id（dsh 发起补全时原样回传，网关按它解析上游）。JSON 非法或元素缺 `id` 时 ensure 直接失败（控制面 400），不写任何文件。
+- **模型提供方投影**（`APEMIND_LLM_BASE_URL` + `APEMIND_API_KEY` + 非空 `APEMIND_LLM_MODELS`）：在 `llm-pi-ai` 行的 config 上合并一个名为 `apemind` 的 provider（`api: openai-completions`、`baseURL` 指 ApeMind 的 OpenAI 兼容网关、`apiKeyEnv: APEMIND_API_KEY`），模型列表来自 `APEMIND_LLM_MODELS`——一个 JSON 数组，元素 `{id, name?, context_window?, vision?}`。`id` 是 ApeMind 模型 id（dsh 发起补全时原样回传，网关按它解析上游）；`name` 写成 dsh `PiAiModelProfile.name`（选择器文案），不是 provider 级的 `displayName`。JSON 非法或元素缺 `id` 时 ensure 直接失败（控制面 400），不写任何文件。每次拉起 dsh 都会按当时的 `env.json` 重写 patch，避免宿主升级后仍读到旧 yaml。
 
 两段都只携带环境变量名，密钥不落在 yaml 里，文件泄露不等于密钥泄露（`env.json` 仍含密钥本体，0600 + uid 隔离保护）。patch 对 dsh 的实际生效行为按锁定的 dsh 版本在 staging 验收（与 MCP 行同一口径）。
 

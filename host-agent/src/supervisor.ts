@@ -127,7 +127,7 @@ function renderModelProviderLines(baseUrl: string, models: ManagedModel[]): stri
   ]
   for (const model of models) {
     lines.push(`          - id: ${yamlSingleQuote(model.id)}`)
-    if (model.name) lines.push(`            displayName: ${yamlSingleQuote(model.name)}`)
+    if (model.name) lines.push(`            name: ${yamlSingleQuote(model.name)}`)
     if (model.contextWindow !== undefined) lines.push(`            contextWindow: ${model.contextWindow}`)
     if (model.vision) lines.push("            input: [text, image]")
   }
@@ -367,15 +367,21 @@ export class Supervisor {
         throw new Error(`invalid env entry: ${key}`)
       }
     }
-    const patch = renderManagedPatch(env)
+    renderManagedPatch(env)
     await fsp.writeFile(this.envPath(inst.userId), `${JSON.stringify(env, null, 2)}\n`, { mode: 0o600 })
+    await this.syncManagedPatch(inst, env)
+    if (inst.meta.uid !== undefined) {
+      await chownTree(path.join(this.homeDir(inst.userId), ".apemind"), inst.meta.uid, inst.meta.uid)
+    }
+  }
+
+  /** Patch yaml is derived from env.json; rewrite it whenever we are about to spawn. */
+  private async syncManagedPatch(inst: Instance, env: Record<string, string>): Promise<void> {
+    const patch = renderManagedPatch(env)
     if (patch !== undefined) {
       await fsp.writeFile(this.patchPath(inst.userId), patch, { mode: 0o600 })
     } else {
       await fsp.rm(this.patchPath(inst.userId), { force: true })
-    }
-    if (inst.meta.uid !== undefined) {
-      await chownTree(path.join(this.homeDir(inst.userId), ".apemind"), inst.meta.uid, inst.meta.uid)
     }
   }
 
@@ -407,6 +413,10 @@ export class Supervisor {
     this.reservedPorts.delete(port)
     const home = this.homeDir(inst.userId)
     const extraEnv = await this.readInstanceEnv(inst)
+    await this.syncManagedPatch(inst, extraEnv)
+    if (inst.meta.uid !== undefined) {
+      await chownTree(path.join(this.homeDir(inst.userId), ".apemind"), inst.meta.uid, inst.meta.uid)
+    }
     const env: NodeJS.ProcessEnv = {
       PATH: process.env.PATH,
       LANG: process.env.LANG ?? "C.UTF-8",
