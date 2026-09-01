@@ -21,6 +21,9 @@
     env.json                         控制面注入的环境变量（含 APEMIND_API_KEY），0600
     managed.cordis.yml               dsh --patch 挂载的托管配置（MCP + 模型投影），0600
     dsh.log                          dsh 进程 stdout/stderr，追加写，0600
+  .config/apemind/                   托管 CLI 凭证（host-agent 按 env.json 写 default profile）
+    config.json                      current_profile=default，0600
+    profiles/default/state.json      base_url + api_key，0600
   .config/  .cache/  .local/share/   XDG 三件套，指给 dsh 与租户内工具
 ```
 
@@ -33,17 +36,17 @@
 | `/usr/local/bin/apemind` | 镜像构建 | 全租户共用只读二进制，不随 PVC、不随实例删除 |
 | `.apemind/` | 只有 host-agent（受控制面 ensure 驱动） | **投影**。权威在 ApeMind 数据库（绑定身份的 managed key、MCP 地址、模型清单）；磁盘上这份只是启动进程所需的物化，删了可以从控制面重新生成 |
 | `.dsh/AGENTS.md` | 只有 host-agent | **托管引导**。权威是 `env.json`；每次 spawn 前重写。`.dsh/` 其余文件仍是 dsh 私有 |
+| `.config/apemind/` | 只有 host-agent | **CLI 凭证投影**。dsh 从 bash/工具子进程剥掉名字含 KEY、PASSWORD、SECRET、TOKEN 的环境变量，agent 跑 `apemind` 时读不到 `APEMIND_API_KEY`；这份 profile 是 CLI 的官方 env 回退。权威仍是 `env.json`，每次 ensure/spawn 覆盖 |
 | `.dsh/` 其余 | 只有 dsh 进程 | 上游运行时私有。ApeMind 不读它当配置源，也不把它回流主站 |
 | `workspace/` | 租户（经 dsh agent） | 用户磁盘。闲置回收、host 重启都保留；只在显式删除实例时销毁 |
 
-这个分界是双向承诺：ApeMind 改配置永远走「更新数据库 → ensure 重投影」，不直接改 `.dsh/settings.yaml`；反过来 dsh 里发生的会话、用户自己改的偏好也不会被 ApeMind 收走。`AGENTS.md` 是唯一的例外：它落在 `$DSH_HOME` 里是因为官方 `dsh-agent-instructions` 从那里加载，但内容由宿主派生。
+这个分界是双向承诺：ApeMind 改配置永远走「更新数据库 → ensure 重投影」，不直接改 `.dsh/settings.yaml`；反过来 dsh 里发生的会话、用户自己改的偏好也不会被 ApeMind 收走。落在 `$DSH_HOME` 与 `$XDG_CONFIG_HOME` 里的托管文件（`AGENTS.md`、CLI profile）是宿主派生的，手工编辑下次 spawn 覆盖。
 
 ### 1.2.1 CLI 与绑定身份（open 注入，落盘持久化）
 
 - **二进制位置**：`/usr/local/bin/apemind`，镜像层。dsh 进程的 `PATH` 继承自 host-agent，所以 agent 开箱就能跑 `apemind`。升级 CLI = 换镜像 tag，不改 PVC。
-- **身份在何时注入**：`POST /api/v2/computer/open`。控制面确保绑定身份的托管 key（个人=用户本人，组织=该组织服务用户），把 `APEMIND_API_KEY`、`APEMIND_BASE_URL`（由 MCP URL 去掉 `/mcp`）、组织实例另加 `APEMIND_ORG_ID` 一并放进 ensure 的 `env`。宿主整体重写该实例 `.apemind/env.json`，并派生 `managed.cordis.yml` 与 `.dsh/AGENTS.md`。
-- **会不会持久化**：会，但落的是宿主侧 `env.json`（PVC，0600），不是 CLI 自己的 profile。CLI 读到 `APEMIND_API_KEY` 就用 Bearer，**不写** `$HOME/.config/apemind`。闲置回收后再唤醒：网关 `wake()` 读现存 `env.json` spawn，身份还在，不必再走一遍 open。下一次 open 会整体覆盖 `env.json`（key 轮换、模型清单变化都走这条）。进程已经 running 时，open 只改磁盘、不改正在跑的进程环境——要生效等下一次冷启动。
-- **CLI 不单独存身份**：agent 在 dsh 里执行 `apemind login` 才会把会话写进该租户 HOME 的 XDG 配置；托管形态不需要、也不应当走这条。凭证权威始终是 `env.json`。
+- **身份在何时注入**：`POST /api/v2/computer/open`。控制面确保绑定身份的托管 key（个人=用户本人，组织=该组织服务用户），把 `APEMIND_API_KEY`、`APEMIND_BASE_URL`（由 MCP URL 去掉 `/mcp`）、组织实例另加 `APEMIND_ORG_ID` 一并放进 ensure 的 `env`。宿主整体重写该实例 `.apemind/env.json`，并派生 `managed.cordis.yml`、`.dsh/AGENTS.md` 与 `.config/apemind/` CLI profile。
+- **会不会持久化**：会。权威投影是 `env.json`（PVC，0600）。同一轮 ensure/spawn 再写一份 CLI profile（`$XDG_CONFIG_HOME/apemind`，0700/0600），因为 dsh 工具子进程会剥掉 `APEMIND_API_KEY`，CLI 必须靠这份文件认证。MCP 与模型网关仍读 dsh **进程**环境里的 key，不受剥离影响。闲置唤醒再 spawn 时两份一起按 `env.json` 重写。下一次 open 整体覆盖（key 轮换走这条）。进程已 running 时 open 只改磁盘：CLI 下次调用即读到新 profile，不必等冷启动；MCP/LLM 的进程环境要等下一次 spawn。
 
 ### 1.3 删除语义
 
@@ -223,7 +226,7 @@ managed key 的生命周期在 ApeMind 侧：`api_key` 表里 `is_managed=true, 
 | 身份 / 谁能开机 | 只在 ApeMind（登录态 + 组织成员校验）；host 只见不透明实例键 | 已有 |
 | 绑定身份的 managed API key、MCP / CLI 地址 | ApeMind → ensure env → `.apemind/env.json` → dsh 进程环境；身份是个人本人或组织服务用户，与谁点开无关 | 已有 |
 | 模型提供方目录 | ApeMind → ensure env（`APEMIND_LLM_BASE_URL` / `APEMIND_LLM_MODELS`）→ `managed.cordis.yml` provider 行；补全流量走 ApeMind OpenAI 兼容网关（ApeMind 为权威，dsh 设置页在非 loopback 浏览器下本就不可用） | 已有 |
-| CLI 二进制 | 镜像 `/usr/local/bin/apemind`；凭证走进程 env，不落 CLI profile | 已有 |
+| CLI 二进制与凭证 | 镜像 `/usr/local/bin/apemind`；进程 env 给 MCP/LLM；CLI profile 给 agent 的 bash | 已有 |
 | 知识库 / 检索 / 智能体工具 | dsh → MCP 在线调用；写面 / 长尾走 CLI | 已有 |
 | `workspace/` 文件 | 只属于这台实例；不自动入库、不回流主站 | 恒定边界 |
 | `.dsh/AGENTS.md` | host-agent 按 env 派生；其余 `.dsh/` 只属于 dsh | 已有 |

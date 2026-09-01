@@ -65,7 +65,7 @@
 | 签票密钥 | 配对时宿主新生成 | 同上 | 同上 | HMAC 短票与会话 cookie |
 | 对外 Origin | 宿主启动配置，权威在宿主 | 配对响应写入，打开时再刷新 | 启动 env | ApeMind 拼 `/open/<ticket>`；网关校验 Origin |
 | 主站 URL | ApeMind 对外地址（已有 `APEMIND_PUBLIC_URL`） | 已有 | 配对请求写入 `host.json` | 无会话 / 已停止时 302 回工作区 Computer 页 |
-| 租户 MCP / LLM / API Key / 模型清单 / CLI 上下文 | 每次打开时 ApeMind 现算 | 绑定身份的 key + 工作区模型 | 该租户 `.apemind/env.json`、`managed.cordis.yml`、`.dsh/AGENTS.md` | 已有 ensure 注入，不进配对 |
+| 租户 MCP / LLM / API Key / 模型清单 / CLI 上下文 | 每次打开时 ApeMind 现算 | 绑定身份的 key + 工作区模型 | 该租户 `.apemind/env.json`、`managed.cordis.yml`、`.dsh/AGENTS.md`、`.config/apemind/` | 已有 ensure 注入，不进配对 |
 
 环境变量里的 `COMPUTER_TICKET_SECRET` / `COMPUTER_CONTROL_TOKEN` 只保留为 **预共享兼容垫**（现网、不想用配对的部署继续可用）。配对成功后以各自存储为准，不再要求这两项 env。
 
