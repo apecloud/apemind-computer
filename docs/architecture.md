@@ -2,7 +2,7 @@
 
 本文回答 computer-host 作为独立多租户 dsh 服务，如何与 ApeMind 协作、数据怎么走、身份怎么签、镜像和隔离怎么做。
 
-落地口径：个人一人一台；组织一组织一台（实例键 `org-{org_id}`，成员共用同一 HOME 与进程）。ApeMind 只做控制面（签票 + 调启停），`user_id` 对 host 完全不透明，零 dsh plugin 代码。
+落地口径：个人一人一台；组织一组织一台（实例键是 ApeMind `computer_instance.id`，形如 `ci` + 16 hex，成员共用同一 HOME 与进程）。ApeMind 只做控制面（签票 + 调启停），实例键对 host 完全不透明，零 dsh plugin 代码。
 
 ## 0. 一句话架构
 
@@ -69,9 +69,10 @@ flowchart TB
   - 路由：`POST /api/v2/computer/open`、`POST /api/v2/computer/stop`、`GET /api/v2/computer`；可选查询参数 `org_id` 切到组织实例。
   - `ticket.py`：HMAC 签票（`v1.<b64url>.<hmac>`，无 DB）。
   - `host_client.py`：httpx 薄客户端。
-  - managed key 签发（复用 `api_key` 表 `is_managed`，无新表）。打开时注入当前操作者的 Computer 托管密钥。
+  - managed key 签发（复用 `api_key` 表 `is_managed`）。打开时注入**绑定身份**的托管密钥：个人=用户本人，组织=该组织的服务用户（不是点开的那个成员）。
+  - 实例表 `computer_instance`：`id` 即宿主租户键；`data_plane_user_id` 指向绑定身份。
 - `web/src/app/workspace/computer/`：单卡片页（状态 / 打开 / 停止）；组织工作区带 `org_id`。
-- 实例状态 source of truth 在 host，aperag 实时查询。零新业务表。
+- 实例状态 source of truth 在 host；aperag 用 `computer_instance` 记绑定身份与租户键，打开时按行投影 env。
 
 **apemind-computer（本仓库）**
 
@@ -114,7 +115,7 @@ v1.<body>.<sig>
 - `sig`：`HMAC-SHA256(secret, body)` 的十六进制小写摘要。
 - 短票 payload `{"t":"ticket","u":"<user_id>","e":<unix秒>,"n":"<nonce>"}`，60 秒，网关内存防重放。
 - 会话 cookie payload `{"t":"session","u":"<user_id>","e":<unix秒>}`，默认 12 小时，HttpOnly + Secure + SameSite=Lax。
-- `u` 对 host 不透明，须匹配 `^[A-Za-z0-9_-]{1,64}$`。个人实例用原始用户 id；组织实例用 `org-{org_id}`。
+- `u` 对 host 不透明，须匹配 `^[A-Za-z0-9_-]{1,64}$`。值是 `computer_instance.id`（`ci` + 16 hex），不是 ApeMind 用户 id，也不是 `org-{org_id}`。
 
 ```mermaid
 sequenceDiagram
@@ -136,7 +137,7 @@ sequenceDiagram
 - dsh 零登录零账号：只见到回环 Host 的请求，天然过它的 /api fence；不配 trustedHosts、不改 dsh。
 - 带 Origin 的请求先校验 `Origin == https://computer.apemind.ai`（或对应 staging Origin）再剥头。
 - 唤醒语义：cookie 有效 + 实例存在但闲置回收 → 网关自己拉起；用户主动停止的不自动唤醒 → 302 主站；实例从未创建 → 302 主站。
-- 组织实例：任一在职成员可打开/停止同一 `org-{org_id}`；停止影响该组织所有成员。MCP 身份跟随最近一次真正拉起进程的操作者。
+- 组织实例：任一在职成员可打开/停止同一 `ci*` 实例；停止影响该组织所有成员。MCP / CLI / 模型网关的身份是组织服务用户，与谁点开无关。
 
 跨语言一致性靠 `tests/vectors/` golden vectors 单测锁住。
 
@@ -147,7 +148,7 @@ sequenceDiagram
 - `POST /v1/pair`：未配对时绑定控制面，换出长期令牌与签票密钥（唯一不要求 Bearer 的写接口，防浏览器校验见 pairing.md §5.1）。
 - `GET /v1/runtime`：未配对无鉴权回 `{state, public_origin, version}`；已配对需 Bearer，另回 `main_url` / `paired_at`。
 - `PUT /v1/runtime`：更新 `main_url`；`POST /v1/unpair`：解除配对。
-- `PUT /v1/instances/{user_id}`：幂等 ensure。body `{desired: running|stopped, env?: {APEMIND_API_KEY?...}}`。同步返回 `{status, port, started_at, last_activity}`。
+- `PUT /v1/instances/{user_id}`：幂等 ensure。路径参数名仍是 `user_id`，值是不透明实例键（ApeMind 的 `computer_instance.id`）。body `{desired: running|stopped, env?: {APEMIND_API_KEY, APEMIND_BASE_URL, …}}`。同步返回 `{status, port, started_at, last_activity}`。
 - `GET /v1/instances/{user_id}`、`GET /v1/instances`：状态（running/stopped/error、RSS、last_activity）。
 - `DELETE /v1/instances/{user_id}`：停进程 + 删工作区（重置）。
 - `POST /v1/instances/{user_id}/revoke-sessions`：会话代数 +1，立刻废掉该实例全部存量网关会话（成员被移出组织等撤权场景由控制面调用；被踢的合法用户重新 open 即恢复）。
@@ -157,7 +158,7 @@ sequenceDiagram
 
 ## 7. host-agent 行为细节
 
-- **supervisor 状态机**：`created → running ⇄ idle-stopped → deleted`，另有 `error(backoff)`。spawn 命令模板 `dsh {patch} --profile web --no-open --port {port}`（`{patch}` 在租户存在 `~/.apemind/managed.cordis.yml` 时展开为 `--patch <该文件>`）；每租户 `HOME=/data/users/<key>`、`DSH_HOME=$HOME/.dsh`、独立 XDG；崩溃指数退避，闲置自动 stop（默认 1800s）；端口重启后重新分配（cookie 只含 user_id，与端口无关）。HOME 目录 0700。逐状态转换、目录所有权与数据流细节见 [lifecycle.md](lifecycle.md)。
+- **supervisor 状态机**：`created → running ⇄ idle-stopped → deleted`，另有 `error(backoff)`。spawn 命令模板 `dsh {patch} --profile web --no-open --port {port}`（`{patch}` 在租户存在 `~/.apemind/managed.cordis.yml` 时展开为 `--patch <文件>`）；每租户 `HOME=/data/users/<key>`、`DSH_HOME=$HOME/.dsh`、独立 XDG；崩溃指数退避，闲置自动 stop（默认 1800s）；端口重启后重新分配（cookie 只含实例键，与端口无关）。HOME 目录 0700。镜像内置 `/usr/local/bin/apemind`。逐状态转换、目录所有权、CLI 身份注入与数据流细节见 [lifecycle.md](lifecycle.md)。
 - **网关转发卫生**：剥 `Origin/Referer/sec-fetch-*`、`Accept-Encoding: identity`、响应加 `X-Accel-Buffering: no`；WS 重写 `Host` 后原始 socket 对拷。
 - **可观测**：结构化 JSON 日志（不落 prompt/key/文档内容），实例数/RSS/活跃度进 `/healthz`。
 
@@ -165,7 +166,7 @@ sequenceDiagram
 
 AIO 底座（Xvfb/Chromium/VNC/noVNC/supervisord/nginx/gem-server/tinyproxy/bubblewrap）整体弃用。托管 dsh WebUI 用不到桌面沙箱，却带来体积、架构限制和多余攻击面。若未来要浏览器自动化/桌面，另起独立镜像轨道。
 
-全新镜像（node:22-bookworm-slim，amd64+arm64）：系统层提供租户 shell 环境与隔离工具；全局安装锁定版本的 `@deepseek-ai/dsh`；host-agent esbuild 单文件；`tini` 作 PID 1。暴露 8080/9090，数据卷 `/data`。
+全新镜像（node:22-bookworm-slim，amd64+arm64）：系统层提供租户 shell 环境与隔离工具；全局安装锁定版本的 `@deepseek-ai/dsh`；构建时锁版本 + sha256 校验装入 `apemind` CLI（`/usr/local/bin/apemind`，运行期零下载）；host-agent esbuild 单文件；`tini` 作 PID 1。暴露 8080/9090，数据卷 `/data`。
 
 - host-agent 以 root 运行（需要 setuid 切租户 uid 与 iptables）；容器保持尽可能少的 capability，P2 回环隔离时加 `NET_ADMIN`。
 - 私有化扩展点：客户 `FROM apecloud/apemind-computer` 再 apt 加自己的工具链。

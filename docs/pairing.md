@@ -29,7 +29,7 @@
 原因都落在密钥和租户命名空间上，不是产品口味：
 
 - **签票密钥是共享 HMAC。** 短票和会话 cookie 用同一把密钥签验。两套 ApeMind 若共用一台宿主、共用一把密钥，任何一边都能为任意实例键签打开链接。两套 ApeMind 若各用一把密钥，宿主验签只能认其中一把，另一边的票全部 403。
-- **实例键对宿主不透明。** 个人键是 ApeMind 的 `user.id`，组织键是 `org-{org_id}`。两套 ApeMind 接到同一宿主时，两边的用户 id 会撞车，HOME 目录会串。
+- **实例键对宿主不透明。** 键是 ApeMind 签发的 `computer_instance.id`（`ci` + 16 hex）。两套 ApeMind 接到同一宿主时，两边的 id 仍可能撞车，HOME 目录会串——这是一对一约束的原因之一，不是允许用用户 id 当键。
 - **回跳主站只有一个。** 无会话时网关 302 到 `{main_url}/workspace/computer`。一台宿主不能同时把用户送回两套主站。
 - **MCP / 模型网关回程绑的是打开时注入的那套 ApeMind 地址和托管 key。** 多控制面共用一台宿主时，租户进程里的 `APEMIND_MCP_URL` 会指向「最后一次 ensure 的那套主仓」，跨部署串号。
 
@@ -65,7 +65,7 @@
 | 签票密钥 | 配对时宿主新生成 | 同上 | 同上 | HMAC 短票与会话 cookie |
 | 对外 Origin | 宿主启动配置，权威在宿主 | 配对响应写入，打开时再刷新 | 启动 env | ApeMind 拼 `/open/<ticket>`；网关校验 Origin |
 | 主站 URL | ApeMind 对外地址（已有 `APEMIND_PUBLIC_URL`） | 已有 | 配对请求写入 `host.json` | 无会话 / 已停止时 302 回工作区 Computer 页 |
-| 租户 MCP / LLM / API Key / 模型清单 | 每次打开时 ApeMind 现算 | 用户/模型库 | 该租户 `.apemind/env.json` 与 `managed.cordis.yml` | 已有 ensure 注入，不进配对 |
+| 租户 MCP / LLM / API Key / 模型清单 / CLI 上下文 | 每次打开时 ApeMind 现算 | 绑定身份的 key + 工作区模型 | 该租户 `.apemind/env.json`、`managed.cordis.yml`、`.dsh/AGENTS.md` | 已有 ensure 注入，不进配对 |
 
 环境变量里的 `COMPUTER_TICKET_SECRET` / `COMPUTER_CONTROL_TOKEN` 只保留为 **预共享兼容垫**（现网、不想用配对的部署继续可用）。配对成功后以各自存储为准，不再要求这两项 env。
 
