@@ -69,9 +69,10 @@ node dist/host-agent.mjs
 ## 镜像
 
 镜像只在 GitHub Actions 构建（推 tag `v*.*.*` 触发），不在本地构建。dsh 版本在
-Dockerfile 的 `DSH_VERSION` 中锁定；`apemind` CLI 同样构建时锁版本 + sha256，
-装到 `/usr/local/bin/apemind`（运行期零下载）。升级 dsh 或 CLI 一律走新镜像 tag
-加回归验证。租户 HOME 与 CLI 身份注入见 [docs/lifecycle.md](docs/lifecycle.md) §1。
+Dockerfile 的 `DSH_VERSION` 中锁定；`pnpm` 由 `corepack` 按 `PNPM_VERSION` 钉死并
+放到 PATH（`dsh plugin` 需要它）；`apemind` CLI 同样构建时锁版本 + sha256，
+装到 `/usr/local/bin/apemind`（运行期零下载）。升级 dsh、pnpm 或 CLI 一律走新镜像
+tag 加回归验证。租户 HOME 与 CLI 身份注入见 [docs/lifecycle.md](docs/lifecycle.md) §1。
 
 ## Kubernetes
 
