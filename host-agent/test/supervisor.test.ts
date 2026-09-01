@@ -84,6 +84,54 @@ test("env with llm projection renders the apemind provider row", async () => {
   }
 })
 
+test("full apemind env renders the workspace guide into DSH_HOME", async () => {
+  const env = await makeEnv()
+  try {
+    await env.sup.ensure("lena", "running", {
+      APEMIND_API_KEY: "sk-test-guide",
+      APEMIND_BASE_URL: "https://main.test",
+      APEMIND_ORG_ID: "org12345678",
+      APEMIND_MCP_URL: "http://mcp.test/mcp",
+      APEMIND_LLM_BASE_URL: "https://main.test/v1/llm",
+      APEMIND_LLM_MODELS: JSON.stringify([{ id: "model0123", name: "GPT X" }]),
+    })
+    const guide = fs.readFileSync(
+      path.join(env.cfg.dataDir, "users", "lena", ".dsh", "AGENTS.md"),
+      "utf8",
+    )
+    assert.match(guide, /ApeMind Hosted Workspace/)
+    assert.match(guide, /https:\/\/main\.test/)
+    assert.match(guide, /org12345678/)
+    assert.match(guide, /apemind skills/)
+    assert.match(guide, /MCP server "apemind"/)
+    assert.doesNotMatch(guide, /sk-test-guide/, "the key must stay out of the guide")
+  } finally {
+    await env.cleanup()
+  }
+})
+
+test("guide without base url is absent and personal guide has no org line", async () => {
+  const env = await makeEnv()
+  try {
+    await env.sup.ensure("mike", "stopped", {
+      APEMIND_API_KEY: "sk-test-noguide",
+      APEMIND_MCP_URL: "http://mcp.test/mcp",
+    })
+    const guidePath = path.join(env.cfg.dataDir, "users", "mike", ".dsh", "AGENTS.md")
+    assert.equal(fs.existsSync(guidePath), false, "no guide without APEMIND_BASE_URL")
+
+    await env.sup.ensure("mike", "stopped", {
+      APEMIND_API_KEY: "sk-test-noguide",
+      APEMIND_BASE_URL: "https://main.test",
+    })
+    const guide = fs.readFileSync(guidePath, "utf8")
+    assert.doesNotMatch(guide, /Bound organization/)
+    assert.doesNotMatch(guide, /MCP server/)
+  } finally {
+    await env.cleanup()
+  }
+})
+
 test("start rewrites a stale managed patch from env.json", async () => {
   const env = await makeEnv()
   try {

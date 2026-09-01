@@ -87,23 +87,18 @@ membership 和角色的用户，`whoami`、`org list`、`collection list --org-i
 绑定身份与通道健康）；`skills` 文本补充托管 dsh 场景说明；OpenAPI 长尾命令
 （审计、用量等）等 agent 真实用到再加。
 
-### 二进制分发（宿主改动）
+### 二进制分发（镜像内置）
 
-ApeMind 服务端本身就发布 CLI 资产：匿名不可变路由
-`/public/apemind-cli/releases/{version}/{asset}`，附 `checksums.txt` 与
-`latest` 指针。宿主直接从**配对的主站**取二进制：
+CLI 直接打进 computer 镜像：Dockerfile 以构建参数锁定版本与每架构 sha256，
+从公开不可变发布路由（`/api/v2/public/apemind-cli/releases/{version}/{asset}`）
+下载 `apemind-linux-{arch}`，校验通过后装到 `/usr/local/bin/apemind`。
+实例进程继承宿主 `PATH`，dsh 里的 agent 开箱即有 `apemind` 命令，
+运行期没有任何下载动作。
 
-1. 配对完成或实例 ensure 时，若本地缺 CLI：`GET {main_url}/public/apemind-cli/latest`
-   得版本号，下载 `apemind-linux-{arch}` 与 `checksums.txt`，校验通过后落
-   `/data/apemind-cli/{version}/apemind`（0755）。
-2. spawn dsh 时把该目录加进实例进程的 `PATH`。
-3. 下载失败不阻塞 dsh 启动：无 CLI 时引导文件不渲染 CLI 段，agent 仍有 MCP 与模型。
-4. 版本跟随主站：主站升级后 `latest` 变化，宿主在下次检查时拉新版本，旧版本目录
-   保留供运行中实例用完即弃。
-
-这个来源选择让私有化部署天然可用（资产在客户自己的服务端对象存储里，不出内网）、
-CLI 与服务端版本恒匹配、computer 镜像不因 CLI 发版而重建。前提是部署发布流程把
-CLI 资产随版本发布进对象存储；没发布过资产的环境表现为第 3 条的降级。
+- 私有化部署无外网依赖：二进制已在镜像层里。
+- 升级 CLI = 升级 Dockerfile 里的版本与校验和参数，走新镜像 tag 与回归。
+- CLI 对旧服务端保持薄客户端兼容；镜像与主站版本允许有偏差，接口不匹配时
+  CLI 返回服务端错误原文，不做本地猜测。
 
 ### 引导文件（宿主改动）
 
@@ -140,7 +135,7 @@ dsh 官方 `dsh-agent-instructions` 插件会自动加载 `$DSH_HOME/AGENTS.md`
 | 阶段 | 仓库 | 内容 |
 | --- | --- | --- |
 | P0 | aperag-enterprise | open 时注入 `APEMIND_BASE_URL`（主站公网地址）；组织实例追加 `APEMIND_ORG_ID` |
-| P0 | apemind-computer | 宿主拉取/缓存 CLI 并加进实例 `PATH`；拉起前渲染 `$DSH_HOME/AGENTS.md` |
+| P0 | apemind-computer | 镜像内置 CLI（锁版本 + 校验和）；拉起前渲染 `$DSH_HOME/AGENTS.md` |
 | P1 | aperag-enterprise | CLI：`--org-id` 缺省读 `APEMIND_ORG_ID`；`doctor` 托管环境诊断；`skills` 文本适配 |
 | P1 | 两仓 | staging 验收脚本：whoami → collection list → upload → search → bot/chat 全链路（个人 + 组织各一遍） |
 | P2 | aperag-enterprise | 组织实例能力档案（服务角色权限旋钮的产品面） |
@@ -175,7 +170,7 @@ dsh 官方 `dsh-agent-instructions` 插件会自动加载 `$DSH_HOME/AGENTS.md`
   OpenAPI 免费演进、不绑 dsh 版本；MCP 留给高频读面。
 - 组织实例里 agent 上传文档用谁的身份、受什么限制？——组织服务用户；受
   `deepseek-harness` 角色限制，初始只读，放宽是角色权限旋钮。
-- CLI 二进制从哪来、拉不到会怎样？——配对主站的公开发布路由，checksums 校验，
-  按版本缓存；拉不到则降级为无 CLI，dsh 照常启动。
+- CLI 二进制从哪来、坏了会怎样？——构建时锁版本 + sha256 校验打进镜像，
+  运行期零下载；升级走新镜像 tag。
 - 想让组织 dsh 能建知识库，要改哪里？——只改服务身份角色的权限，不改 dsh、
   宿主与 CLI。

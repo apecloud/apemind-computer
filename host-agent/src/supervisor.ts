@@ -161,6 +161,31 @@ function renderManagedPatch(env: Record<string, string>): string | undefined {
   return `${sections.join("\n")}\n`
 }
 
+/** Managed workspace guide, loaded by dsh from $DSH_HOME/AGENTS.md. Tells the
+ * agent which identity this instance is bound to and which ApeMind channels
+ * exist. Derived from env.json before every spawn (managed file: manual edits
+ * do not survive a restart). Only env var names and ids appear here. */
+function renderAgentsGuide(env: Record<string, string>): string | undefined {
+  if (!env.APEMIND_API_KEY || !env.APEMIND_BASE_URL) return undefined
+  const lines = [
+    "# ApeMind Hosted Workspace",
+    "",
+    "This dsh instance is managed by ApeMind and bound to one ApeMind identity.",
+    `- ApeMind API base URL: ${env.APEMIND_BASE_URL} (credential already set as env APEMIND_API_KEY; never print it).`,
+    "- The `apemind` CLI is preinstalled and pre-authenticated. Run `apemind skills` for full usage and `apemind whoami` for the bound identity.",
+  ]
+  if (env.APEMIND_ORG_ID) {
+    lines.push(`- Bound organization: ${env.APEMIND_ORG_ID}. Org-scoped CLI commands (collection, document, bot, org) default to it.`)
+  }
+  if (env.APEMIND_MCP_URL) {
+    lines.push('- The MCP server "apemind" provides knowledge search/read tools; prefer it for retrieval and use the CLI for everything else (creating collections, uploading documents, bots, chats).')
+  }
+  if (env.APEMIND_LLM_MODELS && env.APEMIND_LLM_MODELS !== "[]") {
+    lines.push('- The model picker\'s "ApeMind" provider serves this workspace\'s ApeMind models.')
+  }
+  return `${lines.join("\n")}\n`
+}
+
 export class Supervisor {
   private readonly cfg: Config
   private readonly instances = new Map<string, Instance>()
@@ -190,6 +215,10 @@ export class Supervisor {
 
   private patchPath(userId: string): string {
     return path.join(this.homeDir(userId), ".apemind", "managed.cordis.yml")
+  }
+
+  private guidePath(userId: string): string {
+    return path.join(this.homeDir(userId), ".dsh", "AGENTS.md")
   }
 
   async init(): Promise<void> {
@@ -369,19 +398,29 @@ export class Supervisor {
     }
     renderManagedPatch(env)
     await fsp.writeFile(this.envPath(inst.userId), `${JSON.stringify(env, null, 2)}\n`, { mode: 0o600 })
-    await this.syncManagedPatch(inst, env)
+    await this.syncManagedFiles(inst, env)
     if (inst.meta.uid !== undefined) {
       await chownTree(path.join(this.homeDir(inst.userId), ".apemind"), inst.meta.uid, inst.meta.uid)
     }
   }
 
-  /** Patch yaml is derived from env.json; rewrite it whenever we are about to spawn. */
-  private async syncManagedPatch(inst: Instance, env: Record<string, string>): Promise<void> {
+  /** Patch yaml and the workspace guide are derived from env.json; rewrite
+   * both whenever the env changes or we are about to spawn. */
+  private async syncManagedFiles(inst: Instance, env: Record<string, string>): Promise<void> {
     const patch = renderManagedPatch(env)
     if (patch !== undefined) {
       await fsp.writeFile(this.patchPath(inst.userId), patch, { mode: 0o600 })
     } else {
       await fsp.rm(this.patchPath(inst.userId), { force: true })
+    }
+    const guide = renderAgentsGuide(env)
+    if (guide !== undefined) {
+      await fsp.writeFile(this.guidePath(inst.userId), guide, { mode: 0o600 })
+      if (inst.meta.uid !== undefined) {
+        await fsp.chown(this.guidePath(inst.userId), inst.meta.uid, inst.meta.uid)
+      }
+    } else {
+      await fsp.rm(this.guidePath(inst.userId), { force: true })
     }
   }
 
@@ -413,7 +452,7 @@ export class Supervisor {
     this.reservedPorts.delete(port)
     const home = this.homeDir(inst.userId)
     const extraEnv = await this.readInstanceEnv(inst)
-    await this.syncManagedPatch(inst, extraEnv)
+    await this.syncManagedFiles(inst, extraEnv)
     if (inst.meta.uid !== undefined) {
       await chownTree(path.join(this.homeDir(inst.userId), ".apemind"), inst.meta.uid, inst.meta.uid)
     }
