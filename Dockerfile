@@ -31,6 +31,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 ARG DSH_VERSION=0.1.1-rc.2
 RUN npm install -g @deepseek-ai/dsh@${DSH_VERSION} && npm cache clean --force
 
+# `dsh plugin` execs `pnpm` on PATH. Pin via corepack the same way dsh is
+# pinned; upgrades go through a new image tag.
+ARG PNPM_VERSION=11.25.0
+RUN corepack enable && corepack prepare pnpm@${PNPM_VERSION} --activate && pnpm --version
+
 # apemind CLI is baked in (no runtime download): pinned version, pinned
 # per-arch sha256, fetched from the public immutable release route.
 ARG TARGETARCH
