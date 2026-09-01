@@ -131,6 +131,8 @@ uid 隔离开启时以分配的 uid/gid 运行；stdout/stderr 进 `.apemind/dsh
 
 两段都只携带环境变量名，密钥不落在 yaml 里，文件泄露不等于密钥泄露（`env.json` 仍含密钥本体，0600 + uid 隔离保护）。patch 对 dsh 的实际生效行为按锁定的 dsh 版本在 staging 验收（与 MCP 行同一口径）。
 
+`$DSH_HOME/AGENTS.md`（工作区引导，官方 `dsh-agent-instructions` 自动加载）同样按 env 条件渲染：`APEMIND_API_KEY` + `APEMIND_BASE_URL` 齐全时生成，包含绑定身份入口（`apemind whoami` / `apemind skills`）、`APEMIND_ORG_ID` 存在时的默认组织行、MCP 与模型行。它是托管文件——每次拉起 dsh 前按 `env.json` 重写，手工编辑不保留；只出现 env 变量名与 id，不出现密钥。镜像内置 `apemind` CLI（`/usr/local/bin/apemind`，构建时锁版本 + sha256 校验），实例进程经继承的 `PATH` 直接可用，配合注入的 `APEMIND_BASE_URL`/`APEMIND_API_KEY`/`APEMIND_ORG_ID` 免登录工作。
+
 ### 3.3 再次打开 / 换人打开（实例已存在）
 
 同一条 `POST /open` 路径，ensure 幂等：
