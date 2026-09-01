@@ -73,6 +73,11 @@ async function chownTree(root: string, uid: number, gid: number): Promise<void> 
   }
 }
 
+async function writePrivateJson(file: string, value: unknown): Promise<void> {
+  await fsp.writeFile(file, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 })
+  await fsp.chmod(file, 0o600)
+}
+
 function yamlSingleQuote(value: string): string {
   return `'${value.replace(/'/g, "''")}'`
 }
@@ -171,8 +176,8 @@ function renderAgentsGuide(env: Record<string, string>): string | undefined {
     "# ApeMind Hosted Workspace",
     "",
     "This dsh instance is managed by ApeMind and bound to one ApeMind identity.",
-    `- ApeMind API base URL: ${env.APEMIND_BASE_URL} (credential already set as env APEMIND_API_KEY; never print it).`,
-    "- The `apemind` CLI is preinstalled and pre-authenticated. Run `apemind skills` for full usage and `apemind whoami` for the bound identity.",
+    `- ApeMind API base URL: ${env.APEMIND_BASE_URL}.`,
+    "- The `apemind` CLI is preinstalled and pre-authenticated (local profile under `$XDG_CONFIG_HOME/apemind`). Run `apemind skills` for full usage and `apemind whoami` for the bound identity. Do not print credentials.",
   ]
   if (env.APEMIND_ORG_ID) {
     lines.push(`- Bound organization: ${env.APEMIND_ORG_ID}. Org-scoped CLI commands (collection, document, bot, org) default to it.`)
@@ -219,6 +224,12 @@ export class Supervisor {
 
   private guidePath(userId: string): string {
     return path.join(this.homeDir(userId), ".dsh", "AGENTS.md")
+  }
+
+  /** Per-instance CLI state root. Spawn sets XDG_CONFIG_HOME to $HOME/.config,
+   * so this is where `apemind` looks when the bash tool env has been scrubbed. */
+  private cliConfigDir(userId: string): string {
+    return path.join(this.homeDir(userId), ".config", "apemind")
   }
 
   async init(): Promise<void> {
@@ -404,8 +415,8 @@ export class Supervisor {
     }
   }
 
-  /** Patch yaml and the workspace guide are derived from env.json; rewrite
-   * both whenever the env changes or we are about to spawn. */
+  /** Patch yaml, workspace guide, and CLI profile are derived from env.json;
+   * rewrite them whenever the env changes or we are about to spawn. */
   private async syncManagedFiles(inst: Instance, env: Record<string, string>): Promise<void> {
     const patch = renderManagedPatch(env)
     if (patch !== undefined) {
@@ -421,6 +432,32 @@ export class Supervisor {
       }
     } else {
       await fsp.rm(this.guidePath(inst.userId), { force: true })
+    }
+    await this.syncCliProfile(inst, env)
+  }
+
+  /** dsh's bash/tool children are spawned from scrubbedParentEnv(), which drops
+   * any name matching /KEY|PASSWORD|SECRET|TOKEN/i. APEMIND_API_KEY therefore
+   * stays in the dsh Node process (MCP + LLM) but never reaches `apemind` when
+   * the agent runs it. The CLI's documented fallback is this profile. */
+  private async syncCliProfile(inst: Instance, env: Record<string, string>): Promise<void> {
+    const root = this.cliConfigDir(inst.userId)
+    if (!env.APEMIND_API_KEY || !env.APEMIND_BASE_URL) {
+      await fsp.rm(root, { recursive: true, force: true })
+      return
+    }
+    const profileDir = path.join(root, "profiles", "default")
+    await fsp.mkdir(profileDir, { recursive: true })
+    await fsp.chmod(root, 0o700)
+    await fsp.chmod(path.join(root, "profiles"), 0o700)
+    await fsp.chmod(profileDir, 0o700)
+    await writePrivateJson(path.join(root, "config.json"), { current_profile: "default" })
+    await writePrivateJson(path.join(profileDir, "state.json"), {
+      base_url: env.APEMIND_BASE_URL,
+      api_key: env.APEMIND_API_KEY,
+    })
+    if (inst.meta.uid !== undefined) {
+      await chownTree(root, inst.meta.uid, inst.meta.uid)
     }
   }
 

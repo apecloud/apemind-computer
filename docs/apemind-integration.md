@@ -56,7 +56,8 @@ CLI，对 agent 就是「原生能力」——不占上下文预算（不像 MCP
 将来若确需 dsh 界面级集成（例如侧栏里的知识库选择器），再单独评估。
 
 apemind CLI 现状已经具备关键性质，**不需要重写**：Go 单二进制、零运行时依赖、
-`APEMIND_BASE_URL` + `APEMIND_API_KEY` 的 Bearer 认证（env 优先、不落盘）、
+`APEMIND_BASE_URL` + `APEMIND_API_KEY` 的 Bearer 认证（env 优先，其次读
+profile 状态文件）、
 覆盖 org/collection/document/search/bot/chat/turn/admin 的命令面、`--json` 输出、
 内置 `apemind skills` 输出完整使用说明（自描述，agent 一条命令就能自学）。
 
@@ -72,49 +73,48 @@ apemind CLI 现状已经具备关键性质，**不需要重写**：Go 单二进�
 
 ### 认证与身份（已就绪）
 
-**托管 dsh 里的 CLI 没有「登录」这个步骤——认证发生在每次命令执行时。**
-CLI 的凭证查找顺序是：`APEMIND_API_KEY`/`APEMIND_BASE_URL` 环境变量优先，
-其次才是 profile 状态文件（`$XDG_CONFIG_HOME/apemind`，且仅当保存的 base_url
-与目标一致）。托管实例走的是第一条：dsh 进程 spawn 时环境里就有这两个变量，
-agent 的 bash 及所有子进程天然继承，`apemind whoami` 开箱即返回绑定身份。
+**托管 dsh 里的 CLI 没有「登录」这个步骤——打开 Computer 后直接可用。**
 身份就是 key 的属主：个人实例是用户本人，组织实例是服务用户。组织服务用户对
 CLI 无特殊性——它就是一个有 membership 和角色的用户，`whoami`、`org list`、
 `collection list` 按权限正常工作。
 
-三个时机各司其职（目录细节见 [lifecycle.md](lifecycle.md) §1）：
+CLI 的凭证查找顺序是：`APEMIND_API_KEY` 环境变量优先，其次是 profile 状态文件
+（`$XDG_CONFIG_HOME/apemind`，且仅当保存的 `base_url` 与目标一致）。托管实例
+**两条都写，但 agent 实际走的是第二条**：
+
+dsh 把工具子进程的环境从 `scrubbedParentEnv()` 里派生，名字匹配
+`/KEY|PASSWORD|SECRET|TOKEN/i` 的变量一律剥离（保护 `DEEPSEEK_API_KEY` 一类
+harness 密钥不漏进 bash）。因此：
+
+- dsh **进程本身**仍有 `APEMIND_API_KEY`：MCP 插件和 `llm-pi-ai` 从
+  `process.env` 读取，聊天和知识工具不受影响。
+- agent 的 bash / 终端 / 脚本里 `echo $APEMIND_API_KEY` 为空。`APEMIND_BASE_URL`、
+  `APEMIND_MCP_URL`、`APEMIND_ORG_ID` 不含这些词，会保留。
+- 所以宿主在 ensure/spawn 时把同一把 key 写入该实例
+  `$XDG_CONFIG_HOME/apemind/profiles/default/state.json`。CLI 发现环境里没有
+  key，就用这份 profile。每实例一个 HOME、一份 profile，互不越权。
+
+三个时机（目录细节见 [lifecycle.md](lifecycle.md) §1）：
 
 - **open（写盘）**：`POST /open` → 控制面 ensure 把绑定身份的 key、
-  `APEMIND_BASE_URL`、组织时的 `APEMIND_ORG_ID` 整体写入该实例
-  `.apemind/env.json`（0600）。这是身份的唯一权威投影，key 轮换也走这条。
-- **spawn（进环境）**：每次拉起 dsh（冷启动、闲置唤醒、宿主重启后首次触达）
-  按 `env.json` 白名单构造进程环境。进程已 running 时 open 只改磁盘不改环境，
-  生效等下一次冷启动。
-- **执行（读 env）**：CLI 每次调用读环境变量完成 Bearer 认证。没有会话状态，
-  没有过期刷新，key 有效即恒可用。
+  `APEMIND_BASE_URL`、组织时的 `APEMIND_ORG_ID` 整体写入 `.apemind/env.json`，
+  并派生 patch、`AGENTS.md`、CLI profile。
+- **spawn（进环境）**：拉起 dsh 时按 `env.json` 构造进程环境（给 MCP/LLM），
+  并再写一遍 CLI profile。
+- **执行（读 profile）**：agent 跑 `apemind` 时环境里没有 key，CLI 读
+  该实例 HOME 下的 profile 完成 Bearer 认证。
 
 注入的前提：部署配置了 MCP 端点（`APEMIND_BASE_URL` 由 MCP URL 推导）。
-未配 MCP 的部署不注入 CLI 上下文，agent 会看到 `base URL is required`。
+未配 MCP 的部署不注入 CLI 上下文，也不写 profile。
 
-### 为什么不把 key 写进 CLI 配置文件
-
-评估过「open/spawn 时由宿主把 key 写入 CLI profile 状态文件」的方案——确实是
-纯本地文件写入（api-key 认证无需服务端握手），但被拒，理由：
-
-- **没有增量收益**：dsh 里 agent 能触达的一切工具（bash、web 终端、脚本）都是
-  dsh 的后代进程，POSIX 环境继承在这条链上不会丢。env 认证已恒可用。
-- **格式耦合**：profile 状态文件（`config.json` + `profiles/<name>/state.json`）
-  是 CLI 的内部实现，host-agent（TypeScript）硬编码 Go CLI 的私有 schema，
-  CLI 重构一次就悄悄破一次。
-- **密钥双份落盘**：`env.json` 之外再多一份拷贝，轮换一致性要多管一处，
-  威胁模型上没有任何改善（同一 HOME、同 0600、同 uid）。
-
-若将来出现 env 传播真实断裂的场景，正确姿势是给 CLI 加一个官方写入命令
-（如 `apemind profile` 系列 + `--api-key-stdin`），由宿主在 spawn 前以租户 uid
-执行一次——schema 归 CLI 所有，宿主只调公开命令面。目前不做。
+CLI profile 的字段只使用 CLI 已经公开的 `base_url` / `api_key`；目录权限
+0700、文件 0600，与 CLI 自己 `Save` 写出的形态一致。key 轮换 = 下一次
+ensure 覆盖 `env.json` 和 profile。不在 host-agent 里调用 `apemind login`
+（那会走会话 cookie，不是托管 key）。
 
 ### 逐实例隔离：每个 dsh 一份独立凭证
 
-「一个大容器 N 个 dsh」下的不越权由三层保证，CLI 不需要任何额外机制：
+「一个大容器 N 个 dsh」下的不越权由三层保证：
 
 1. **env 是 per-process 的**：spawn 用白名单构造环境（不继承 host-agent 的
    env），每个 dsh 进程只带自己实例 `env.json` 里的 key。租户 A 的进程环境里
@@ -122,10 +122,8 @@ CLI 无特殊性——它就是一个有 membership 和角色的用户，`whoami
 2. **key 本身是实例绑定身份签的**：个人=本人、组织=服务用户。就算 key 泄露给
    同实例里的 agent（本来就是给它用的），权限边界也在服务端 RBAC，越不出
    绑定身份的角色。
-3. **HOME/uid 隔离**：每实例 HOME 0700 + 独立 uid + 回环 iptables。CLI 的
-   状态目录跟随 `XDG_CONFIG_HOME`（spawn 时已指向各实例自己的
-   `$HOME/.config`），即使 agent 主动 `apemind login` 落了状态，也只落在
-   自己 HOME 里，别的实例读不到。
+3. **HOME/uid 隔离**：每实例 HOME 0700 + 独立 uid + 回环 iptables。CLI profile
+   写在该实例 `$XDG_CONFIG_HOME/apemind`，别的实例读不到。
 
 （CLI 没有 cwd 级「目录认证」——它的状态定位是 XDG/HOME 级。托管布局恰好
 利用了这一点：XDG 指到哪，状态就隔离到哪。）
@@ -168,7 +166,7 @@ dsh 官方 `dsh-agent-instructions` 插件会自动加载 `$DSH_HOME/AGENTS.md`
 内容原则：短、面向模型（英文）、只写事实和入口，不复制 CLI 手册：
 
 - 你在 ApeMind 托管的 dsh 里，绑定身份见 `apemind whoami`；
-- 凭证已在环境里（只提 env 变量名，不写值）；
+- 凭证已预置（CLI 读本实例 profile；不要打印密钥）；
 - 组织实例：默认组织是 `$APEMIND_ORG_ID`，CLI 命令默认作用于它；
 - 三条通道一句话各自何时用（MCP 检索读面 / CLI 其余一切 / 模型选择器）；
 - 完整 CLI 用法运行 `apemind skills` 获取。

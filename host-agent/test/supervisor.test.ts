@@ -105,6 +105,54 @@ test("full apemind env renders the workspace guide into DSH_HOME", async () => {
     assert.match(guide, /apemind skills/)
     assert.match(guide, /MCP server "apemind"/)
     assert.doesNotMatch(guide, /sk-test-guide/, "the key must stay out of the guide")
+
+    const statePath = path.join(
+      env.cfg.dataDir,
+      "users",
+      "lena",
+      ".config",
+      "apemind",
+      "profiles",
+      "default",
+      "state.json",
+    )
+    const profile = JSON.parse(fs.readFileSync(statePath, "utf8")) as {
+      base_url: string
+      api_key: string
+    }
+    assert.equal(profile.base_url, "https://main.test")
+    assert.equal(profile.api_key, "sk-test-guide")
+    assert.equal(fs.statSync(statePath).mode & 0o777, 0o600)
+    const cfg = JSON.parse(
+      fs.readFileSync(
+        path.join(env.cfg.dataDir, "users", "lena", ".config", "apemind", "config.json"),
+        "utf8",
+      ),
+    ) as { current_profile: string }
+    assert.equal(cfg.current_profile, "default")
+  } finally {
+    await env.cleanup()
+  }
+})
+
+test("CLI profile is rewritten when the bound key rotates", async () => {
+  const env = await makeEnv()
+  try {
+    await env.sup.ensure("nina", "stopped", {
+      APEMIND_API_KEY: "sk-old",
+      APEMIND_BASE_URL: "https://main.test",
+    })
+    await env.sup.ensure("nina", "stopped", {
+      APEMIND_API_KEY: "sk-new",
+      APEMIND_BASE_URL: "https://main.test",
+    })
+    const profile = JSON.parse(
+      fs.readFileSync(
+        path.join(env.cfg.dataDir, "users", "nina", ".config", "apemind", "profiles", "default", "state.json"),
+        "utf8",
+      ),
+    ) as { api_key: string }
+    assert.equal(profile.api_key, "sk-new")
   } finally {
     await env.cleanup()
   }
@@ -119,6 +167,11 @@ test("guide without base url is absent and personal guide has no org line", asyn
     })
     const guidePath = path.join(env.cfg.dataDir, "users", "mike", ".dsh", "AGENTS.md")
     assert.equal(fs.existsSync(guidePath), false, "no guide without APEMIND_BASE_URL")
+    assert.equal(
+      fs.existsSync(path.join(env.cfg.dataDir, "users", "mike", ".config", "apemind")),
+      false,
+      "no CLI profile without APEMIND_BASE_URL",
+    )
 
     await env.sup.ensure("mike", "stopped", {
       APEMIND_API_KEY: "sk-test-noguide",
