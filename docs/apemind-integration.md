@@ -72,10 +72,68 @@ apemind CLI 现状已经具备关键性质，**不需要重写**：Go 单二进�
 
 ### 认证与身份（已就绪）
 
-CLI 收到 `APEMIND_API_KEY` 即用 Bearer 认证，身份就是 key 的属主：个人实例是
-用户本人，组织实例是服务用户。组织服务用户对 CLI 无特殊性——它就是一个有
-membership 和角色的用户，`whoami`、`org list`、`collection list --org-id` 按
-权限正常工作。无需为「隐藏用户」做任何 CLI 侧适配。
+**托管 dsh 里的 CLI 没有「登录」这个步骤——认证发生在每次命令执行时。**
+CLI 的凭证查找顺序是：`APEMIND_API_KEY`/`APEMIND_BASE_URL` 环境变量优先，
+其次才是 profile 状态文件（`$XDG_CONFIG_HOME/apemind`，且仅当保存的 base_url
+与目标一致）。托管实例走的是第一条：dsh 进程 spawn 时环境里就有这两个变量，
+agent 的 bash 及所有子进程天然继承，`apemind whoami` 开箱即返回绑定身份。
+身份就是 key 的属主：个人实例是用户本人，组织实例是服务用户。组织服务用户对
+CLI 无特殊性——它就是一个有 membership 和角色的用户，`whoami`、`org list`、
+`collection list` 按权限正常工作。
+
+三个时机各司其职（目录细节见 [lifecycle.md](lifecycle.md) §1）：
+
+- **open（写盘）**：`POST /open` → 控制面 ensure 把绑定身份的 key、
+  `APEMIND_BASE_URL`、组织时的 `APEMIND_ORG_ID` 整体写入该实例
+  `.apemind/env.json`（0600）。这是身份的唯一权威投影，key 轮换也走这条。
+- **spawn（进环境）**：每次拉起 dsh（冷启动、闲置唤醒、宿主重启后首次触达）
+  按 `env.json` 白名单构造进程环境。进程已 running 时 open 只改磁盘不改环境，
+  生效等下一次冷启动。
+- **执行（读 env）**：CLI 每次调用读环境变量完成 Bearer 认证。没有会话状态，
+  没有过期刷新，key 有效即恒可用。
+
+注入的前提：部署配置了 MCP 端点（`APEMIND_BASE_URL` 由 MCP URL 推导）。
+未配 MCP 的部署不注入 CLI 上下文，agent 会看到 `base URL is required`。
+
+### 为什么不把 key 写进 CLI 配置文件
+
+评估过「open/spawn 时由宿主把 key 写入 CLI profile 状态文件」的方案——确实是
+纯本地文件写入（api-key 认证无需服务端握手），但被拒，理由：
+
+- **没有增量收益**：dsh 里 agent 能触达的一切工具（bash、web 终端、脚本）都是
+  dsh 的后代进程，POSIX 环境继承在这条链上不会丢。env 认证已恒可用。
+- **格式耦合**：profile 状态文件（`config.json` + `profiles/<name>/state.json`）
+  是 CLI 的内部实现，host-agent（TypeScript）硬编码 Go CLI 的私有 schema，
+  CLI 重构一次就悄悄破一次。
+- **密钥双份落盘**：`env.json` 之外再多一份拷贝，轮换一致性要多管一处，
+  威胁模型上没有任何改善（同一 HOME、同 0600、同 uid）。
+
+若将来出现 env 传播真实断裂的场景，正确姿势是给 CLI 加一个官方写入命令
+（如 `apemind profile` 系列 + `--api-key-stdin`），由宿主在 spawn 前以租户 uid
+执行一次——schema 归 CLI 所有，宿主只调公开命令面。目前不做。
+
+### 逐实例隔离：每个 dsh 一份独立凭证
+
+「一个大容器 N 个 dsh」下的不越权由三层保证，CLI 不需要任何额外机制：
+
+1. **env 是 per-process 的**：spawn 用白名单构造环境（不继承 host-agent 的
+   env），每个 dsh 进程只带自己实例 `env.json` 里的 key。租户 A 的进程环境里
+   没有 B 的任何东西。
+2. **key 本身是实例绑定身份签的**：个人=本人、组织=服务用户。就算 key 泄露给
+   同实例里的 agent（本来就是给它用的），权限边界也在服务端 RBAC，越不出
+   绑定身份的角色。
+3. **HOME/uid 隔离**：每实例 HOME 0700 + 独立 uid + 回环 iptables。CLI 的
+   状态目录跟随 `XDG_CONFIG_HOME`（spawn 时已指向各实例自己的
+   `$HOME/.config`），即使 agent 主动 `apemind login` 落了状态，也只落在
+   自己 HOME 里，别的实例读不到。
+
+（CLI 没有 cwd 级「目录认证」——它的状态定位是 XDG/HOME 级。托管布局恰好
+利用了这一点：XDG 指到哪，状态就隔离到哪。）
+
+### 二进制位置
+
+镜像内 `/usr/local/bin/apemind`，全租户共用只读层，不在租户 HOME、不随实例删除。
+dsh 进程继承宿主 `PATH`，agent 直接跑 `apemind`。升级 = 换镜像 tag。
 
 ### 上下文缺省（CLI 小改）
 
