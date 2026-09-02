@@ -23,7 +23,9 @@ host-agent/   Node 服务（TypeScript，零运行时依赖，esbuild 打成单�
   src/        gateway / control / supervisor / ticket / config
   test/       node:test 单元与集成测试（内置 fake dsh）
 docs/         架构（architecture.md）、生命周期（lifecycle.md）、稳定性（stability.md）、配对与认证（pairing.md）、宿主运营配置（host-settings.md）、ApeMind 能力结合（apemind-integration.md）、LTS（lts.md）
+scripts/      运营脚本（密度压测 density.py）
 tests/vectors 票据 golden vectors（Python 生成，双端测试共用）
+tests/density 密度脚本的前缀与停条件单测
 deploy/       Kubernetes Helm chart（独立发布，不绑 ApeMind 主 chart）
 Dockerfile    运行镜像（node:22-bookworm-slim + 锁版本 dsh + apemind CLI + host-agent）
 ```
@@ -64,6 +66,24 @@ node dist/host-agent.mjs
 | `COMPUTER_LOOPBACK_ISOLATION` | 关闭 | 按 uid 装回环 iptables 规则，防租户串访，需 NET_ADMIN |
 
 闲置回收、会话 cookie 寿命、就绪窗口、停进程宽限和实例容量在 `/data/settings.json`（完整五键），出厂文件见镜像内 `/usr/local/share/apemind-computer/settings.json`。配对后用 `GET/PUT /v1/runtime` 的 `settings` 热更新。详见 [docs/host-settings.md](docs/host-settings.md)。
+
+## 密度压测
+
+`scripts/density.py` 打控制面 `PUT /v1/instances/{key}`，按批次拉起真实 dsh。
+只接受以 `density` 开头的前缀，退出默认停掉并删除本次建的键。令牌从
+`COMPUTER_CONTROL_TOKEN` 或 `--token-file` 读，不进日志。
+
+```bash
+# 本地（先 port-forward 控制口 :9090）
+COMPUTER_CONTROL_TOKEN=dev-token python3 scripts/density.py \
+  --url http://127.0.0.1:9090 --count 20 --batch 10
+
+python3 tests/density/test_density.py
+python3 scripts/density.py --cleanup-only --url http://127.0.0.1:9090
+```
+
+不要对生产控制面跑。容器内存顶、cgroup 是否降级、闲置回收仍按
+[docs/stability.md](docs/stability.md) 生效；本脚本不测网关数据面。
 
 ## 镜像
 
