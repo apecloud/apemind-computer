@@ -158,7 +158,7 @@ sequenceDiagram
 
 ## 7. host-agent 行为细节
 
-- **supervisor 状态机**：`created → running ⇄ idle-stopped → deleted`，另有 `error(backoff)`。spawn 命令模板 `dsh {patch} --profile web --no-open --port {port}`（`{patch}` 在租户存在 `~/.apemind/managed.cordis.yml` 时展开为 `--patch <文件>`）；每租户 `HOME=/data/users/<key>`、`DSH_HOME=$HOME/.dsh`、独立 XDG；崩溃指数退避，闲置自动 stop（默认 1800s）；端口重启后重新分配（cookie 只含实例键，与端口无关）。HOME 目录 0700。镜像内置 `/usr/local/bin/apemind`。逐状态转换、目录所有权、CLI 身份注入与数据流细节见 [lifecycle.md](lifecycle.md)。
+- **supervisor 状态机**：`created → running ⇄ idle-stopped → deleted`，另有 `error(backoff)`。spawn 命令模板 `dsh {patch} --profile web --no-open --port {port}`（`{patch}` 在租户存在 `~/.apemind/managed.cordis.yml` 时展开为 `--patch <文件>`）；每租户 `HOME=/data/users/<key>`、`DSH_HOME=$HOME/.dsh`、独立 XDG；崩溃指数退避，闲置自动 stop（默认 1800s）；端口重启后重新分配（cookie 只含实例键，与端口无关）。HOME 目录 0700。镜像内置 `/usr/local/bin/apemind`。逐状态转换、目录所有权、CLI 身份注入与数据流细节见 [lifecycle.md](lifecycle.md)。谁救 dsh、谁救 host-agent、为什么镜像里不再套一层重启，见 [stability.md](stability.md)。
 - **网关转发卫生**：剥 `Origin/Referer/sec-fetch-*`、`Accept-Encoding: identity`、响应加 `X-Accel-Buffering: no`；WS 重写 `Host` 后原始 socket 对拷。
 - **可观测**：结构化 JSON 日志（不落 prompt/key/文档内容），实例数/RSS/活跃度进 `/healthz`。
 

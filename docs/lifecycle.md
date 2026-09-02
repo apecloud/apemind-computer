@@ -1,6 +1,6 @@
 # dsh 生命周期与数据流
 
-[architecture.md](architecture.md) 回答「computer-host 是什么、边界在哪、契约长什么样」。[pairing.md](pairing.md) 回答控制面如何第一次连上宿主、密钥存在哪。本文放大其中一层：**一台托管 dsh 从无到有、从活跃到休眠再到删除，每一步谁触发、host-agent 做了什么、磁盘上留下什么**。所有行为以 `host-agent/src/`（supervisor / gateway / control）与 ApeMind 侧 `aperag/domains/computer/` 的当前实现为准；默认参数来自 `host-agent/src/config.ts`。
+[architecture.md](architecture.md) 回答「computer-host 是什么、边界在哪、契约长什么样」。[pairing.md](pairing.md) 回答控制面如何第一次连上宿主、密钥存在哪。[stability.md](stability.md) 回答「dsh 崩了谁救、host-agent 崩了谁救」。本文放大其中一层：**一台托管 dsh 从无到有、从活跃到休眠再到删除，每一步谁触发、host-agent 做了什么、磁盘上留下什么**。所有行为以 `host-agent/src/`（supervisor / gateway / control）与 ApeMind 侧 `aperag/domains/computer/` 的当前实现为准；默认参数来自 `host-agent/src/config.ts`。
 
 心智模型：把每个实例当成一台 **scale-to-zero 的数据库实例**——存储（租户 HOME 目录）常驻在 PVC 上，计算（`dsh web` 进程）按需拉起、闲置回收；唤醒靠流量触达，不靠常驻心跳。
 
@@ -79,7 +79,7 @@ stateDiagram-v2
 - **停止**：SIGTERM，`settings.json` 的 `stop_grace_sec`（出厂 10s）内没退干净则 SIGKILL。
 - **崩溃退避**：`running` 中的进程意外退出且 desired 仍是 running 时，按 `min(500ms × 2^n, 30s)` 退避自动重启；连续超过 5 次转 `error` 放弃。任何一次 ensure/wake 都会清零失败计数、重新尝试。
 - **端口是易耗品**：每次启动从 `COMPUTER_PORT_BASE`（默认 31000）向上找空闲端口，重启后端口可能变。会话 cookie 只含实例键不含端口，所以对用户透明。
-- **host-agent 重启**：`init()` 扫 `/data/users/` 逐个读 `meta.json` 恢复注册表，所有实例 status=stopped，**不主动拉起任何进程**；desired=running 的实例等第一个带合法 cookie 的请求把它唤醒。冷备恢复语义与闲置回收完全一致。
+- **host-agent 重启**：`init()` 扫 `/data/users/` 逐个读 `meta.json` 恢复注册表，所有实例 status=stopped，**不主动拉起任何进程**；desired=running 的实例等第一个带合法 cookie 的请求把它唤醒。冷备恢复语义与闲置回收完全一致。host-agent 进程自己退出时由 Docker / K8s 整容器拉起，镜像内不再套自动重启，见 [stability.md](stability.md)。
 
 ## 3. 生命周期时序与控制面调用
 
