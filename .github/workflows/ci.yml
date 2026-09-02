@@ -27,6 +27,9 @@ jobs:
       - name: Ticket vectors match the generator
         run: python3 tests/vectors/generate.py --check
 
+      - name: Density script safety checks
+        run: python3 tests/density/test_density.py
+
       - name: Install
         working-directory: host-agent
         run: npm ci --no-fund --no-audit
