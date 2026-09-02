@@ -3,6 +3,7 @@
 [architecture.md](architecture.md) 回答「两边怎么分工、控制 API 有哪些」。
 [lifecycle.md](lifecycle.md) 回答「实例怎么启停、闲置怎么回收」。
 [pairing.md](pairing.md) 回答「密钥存在哪、一对一怎么约束」。
+[stability.md](stability.md) §6 回答「每户内存限额以后怎么进同一份文件」。
 
 本文放大其中一层：**运营旋钮只认一份磁盘文件，文件必须带齐全部字段，
 打开就能看见生效值。** 不再为这些旋钮保留环境变量，也不再允许「字段缺席

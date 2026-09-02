@@ -176,7 +176,7 @@ AIO 底座（Xvfb/Chromium/VNC/noVNC/supervisord/nginx/gem-server/tinyproxy/bubb
 
 1. **per-user uid**：每实例独立 uid，HOME 0700。
 2. **回环防串访**：否则租户 A 一条 `curl 127.0.0.1:31002` 即可操纵租户 B 的 dsh。iptables `-m owner --uid-owner` 只放行 host-agent uid 访问 dsh 端口段。
-3. **资源限额**：Node `--max-old-space-size` + host-agent 内存 watchdog；cgroup 委托可用时按实例设 memory.max/pids.max。
+3. **资源限额**：整容器 Helm limit 是最后一道；每实例 cgroup `memory.max` / `pids.max` 由 host-agent 在容器内写，口径见 [stability.md](stability.md) §6。`ulimit` 和 Node 堆上限不能当租户限额。
 4. 残余风险：同容器共享内核、dsh 执行任意 shell，恶意租户逃逸风险非零；强隔离升级路径是 per-user pod/microVM（牺牲密度，不进本期）。
 
 密度目标：活跃实例约 300–500MB RSS，闲置回收后单 64–128GB 节点服务数百注册用户。
