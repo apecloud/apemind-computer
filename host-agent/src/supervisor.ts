@@ -6,6 +6,7 @@ import * as net from "node:net"
 import * as path from "node:path"
 import { CgroupManager } from "./cgroup.ts"
 import type { Config } from "./config.ts"
+import { ensureDefaultDshIm } from "./dsh-im.ts"
 import type { HostSettingsStore } from "./settings.ts"
 import { log } from "./log.ts"
 import { USER_ID_RE } from "./ticket.ts"
@@ -142,10 +143,15 @@ function renderModelProviderLines(baseUrl: string, models: ManagedModel[]): stri
   return lines
 }
 
-/** Managed cordis patch: ApeMind MCP tools plus the projected model provider.
- * Secrets stay in the process env; the patch only carries env var names. */
+/** Managed cordis patch: IM plugin RPC authority, ApeMind MCP tools, and the
+ * projected model provider. Secrets stay in the process env; the patch only
+ * carries env var names. */
 function renderManagedPatch(env: Record<string, string>): string | undefined {
-  const sections: string[] = []
+  const sections: string[] = [
+    "- id: xmanrui-dsh-im",
+    "  config:",
+    "    rpcAuthority: trusted-host",
+  ]
   if (env.APEMIND_MCP_URL && env.APEMIND_API_KEY) {
     sections.push(
       "- insert:",
@@ -505,8 +511,12 @@ export class Supervisor {
     const home = this.homeDir(inst.userId)
     const extraEnv = await this.readInstanceEnv(inst)
     await this.syncManagedFiles(inst, extraEnv)
+    const dshHome = path.join(home, ".dsh")
+    const seeded = await ensureDefaultDshIm(dshHome, this.cfg.dshImSeed)
+    if (seeded.applied) log.info("default dsh-im seeded", { user: inst.userId })
     if (inst.meta.uid !== undefined) {
       await chownTree(path.join(this.homeDir(inst.userId), ".apemind"), inst.meta.uid, inst.meta.uid)
+      if (seeded.applied) await chownTree(path.join(dshHome, "profiles"), inst.meta.uid, inst.meta.uid)
     }
     const env: NodeJS.ProcessEnv = {
       PATH: process.env.PATH,

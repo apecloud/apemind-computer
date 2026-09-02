@@ -12,6 +12,7 @@
 
 ```
 /usr/local/bin/apemind               镜像内置 CLI（构建时锁版本 + sha256），所有实例进程经 PATH 共用
+/opt/dsh-seed/.dsh                   镜像内置 web profile seed（含锁版本 @xmanrui/dsh-im），只读，不进 PVC
 /data/users/<instance_key>/          HOME，0700（防跨租户遍历，与 uid 隔离无关，恒开）
   workspace/                         dsh 进程的 cwd；agent 读写的文件都在这里
   .dsh/                              DSH_HOME：dsh 自己的会话、缓存、settings
@@ -36,6 +37,7 @@
 | `/usr/local/bin/apemind` | 镜像构建 | 全租户共用只读二进制，不随 PVC、不随实例删除 |
 | `.apemind/` | 只有 host-agent（受控制面 ensure 驱动） | **投影**。权威在 ApeMind 数据库（绑定身份的 managed key、MCP 地址、模型清单）；磁盘上这份只是启动进程所需的物化，删了可以从控制面重新生成 |
 | `.dsh/AGENTS.md` | 只有 host-agent | **托管引导**。权威是 `env.json`；每次 spawn 前重写。`.dsh/` 其余文件仍是 dsh 私有 |
+| `$DSH_HOME/profiles/web` 里的 `@xmanrui/dsh-im` | host-agent 只补缺 | **默认 IM 插件**。权威是镜像 `/opt/dsh-seed/.dsh`；已有版本和其它插件不覆盖 |
 | `.config/apemind/` | 只有 host-agent | **CLI 凭证投影**。dsh 从 bash/工具子进程剥掉名字含 KEY、PASSWORD、SECRET、TOKEN 的环境变量，agent 跑 `apemind` 时读不到 `APEMIND_API_KEY`；这份 profile 是 CLI 的官方 env 回退。权威仍是 `env.json`，每次 ensure/spawn 覆盖 |
 | `.dsh/` 其余 | 只有 dsh 进程 | 上游运行时私有。ApeMind 不读它当配置源，也不把它回流主站 |
 | `workspace/` | 租户（经 dsh agent） | 用户磁盘。闲置回收、host 重启都保留；只在显式删除实例时销毁 |
@@ -138,8 +140,9 @@ dsh {patch} --profile web --no-open --port {port}
 
 uid 隔离开启时以分配的 uid/gid 运行；stdout/stderr 进 `.apemind/dsh.log`。
 
-`managed.cordis.yml` 有两段内容，都按 env 是否齐全条件渲染：
+`managed.cordis.yml` 有三段内容。IM 段始终写出；其余两段按 env 是否齐全条件渲染：
 
+- **IM 机器人 RPC**（始终）：给 `xmanrui-dsh-im` 写 `rpcAuthority: trusted-host`。网关把浏览器 Host 指到回环，面板域名要能管机器人。插件本体在镜像 seed，host-agent 拉起前写入 `$DSH_HOME/profiles/web`。
 - **MCP 工具**（`APEMIND_MCP_URL` + `APEMIND_API_KEY`）：插入官方 `@deepseek-ai/dsh-mcp-client` 插件行，streamable-http 指向 MCP 地址，Authorization 头用 `!!js` 从**进程环境**读 `APEMIND_API_KEY`。
 - **模型提供方投影**（`APEMIND_LLM_BASE_URL` + `APEMIND_API_KEY` + 非空 `APEMIND_LLM_MODELS`）：在 `llm-pi-ai` 行的 config 上合并一个名为 `apemind` 的 provider（`api: openai-completions`、`baseURL` 指 ApeMind 的 OpenAI 兼容网关、`apiKeyEnv: APEMIND_API_KEY`），模型列表来自 `APEMIND_LLM_MODELS`——一个 JSON 数组，元素 `{id, name?, context_window?, vision?}`。`id` 是 ApeMind 模型 id（dsh 发起补全时原样回传，网关按它解析上游）；`name` 写成 dsh `PiAiModelProfile.name`（选择器文案），不是 provider 级的 `displayName`。JSON 非法或元素缺 `id` 时 ensure 直接失败（控制面 400），不写任何文件。每次拉起 dsh 都会按当时的 `env.json` 重写 patch，避免宿主升级后仍读到旧 yaml。
 
