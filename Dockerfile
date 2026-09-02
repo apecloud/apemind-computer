@@ -41,6 +41,20 @@ RUN npm install -g @deepseek-ai/dsh@${DSH_VERSION} && npm cache clean --force
 ARG PNPM_VERSION=11.25.0
 RUN corepack enable && corepack prepare pnpm@${PNPM_VERSION} --activate && pnpm --version
 
+# Official IM plugin, pinned. host-agent copies this seed into each tenant
+# $DSH_HOME so instances do not download from npm at start.
+ARG DSH_IM_VERSION=4.8.0
+RUN mkdir -p /opt/dsh-seed \
+    && HOME=/opt/dsh-seed DSH_HOME=/opt/dsh-seed/.dsh \
+       dsh --profile web --dump-default-config >/dev/null \
+    && HOME=/opt/dsh-seed DSH_HOME=/opt/dsh-seed/.dsh \
+       PNPM_STORE_DIR=/tmp/pnpm-store \
+       dsh plugin --profile web add -w --save-exact @xmanrui/dsh-im@${DSH_IM_VERSION} \
+    && test -f /opt/dsh-seed/.dsh/profiles/web/node_modules/@xmanrui/dsh-im/package.json \
+    && grep -q "@xmanrui/dsh-im" /opt/dsh-seed/.dsh/profiles/web/package.json \
+    && rm -rf /tmp/pnpm-store /opt/dsh-seed/.local /opt/dsh-seed/Library \
+    && chmod -R a+rX /opt/dsh-seed/.dsh
+
 # apemind CLI is baked in (no runtime download): pinned version, pinned
 # per-arch sha256, fetched from the public immutable release route.
 ARG TARGETARCH

@@ -52,8 +52,9 @@ CLI，对 agent 就是「原生能力」——不占上下文预算（不像 MCP
 
 自定义 dsh plugin 则相反：dsh 处于 developer preview，plugin API 随版本漂移，
 每次升级锁定版本都要回归；能力面要一个个做成 plugin UI 才有价值，维护成本随
-覆盖面线性增长。托管形态从第一天就坚持「零 plugin 代码」，本方案维持这个决策。
-将来若确需 dsh 界面级集成（例如侧栏里的知识库选择器），再单独评估。
+覆盖面线性增长。托管形态从第一天就坚持「零自研 plugin 代码」，本方案维持这个决策。
+IM 渠道用上游 `@xmanrui/dsh-im`（镜像锁版本，不是本仓代码）。将来若确需
+dsh 界面级集成（例如侧栏里的知识库选择器），再单独评估。
 
 apemind CLI 现状已经具备关键性质，**不需要重写**：Go 单二进制、零运行时依赖、
 `APEMIND_BASE_URL` + `APEMIND_API_KEY` 的 Bearer 认证（env 优先，其次读

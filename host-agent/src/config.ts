@@ -25,6 +25,11 @@ export interface Config {
   loopbackIsolation: boolean
   /** Optional helper that sets PR_SET_PDEATHSIG + a new process group before exec. */
   dshExec: string
+  /**
+   * Seed $DSH_HOME that already has @xmanrui/dsh-im installed. Empty disables
+   * the default IM plugin. The image writes this under /opt/dsh-seed/.dsh.
+   */
+  dshImSeed: string
   version: string
 }
 
@@ -64,6 +69,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     uidBase: intEnv(env, "COMPUTER_UID_BASE", 0),
     loopbackIsolation: (env.COMPUTER_LOOPBACK_ISOLATION ?? "").trim() === "1",
     dshExec: (env.COMPUTER_DSH_EXEC ?? "/usr/local/bin/dsh-exec").trim(),
+    dshImSeed: (env.COMPUTER_DSH_IM_SEED ?? "/opt/dsh-seed/.dsh").trim(),
     version: env.COMPUTER_VERSION ?? "dev",
   }
 }

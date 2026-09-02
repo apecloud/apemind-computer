@@ -1,5 +1,6 @@
 import assert from "node:assert/strict"
 import * as fs from "node:fs"
+import * as os from "node:os"
 import * as path from "node:path"
 import { test } from "node:test"
 import { CapacityError } from "../src/supervisor.ts"
@@ -43,6 +44,8 @@ test("env with mcp settings renders the managed patch and passes --patch", async
     const home = path.join(env.cfg.dataDir, "users", "bob")
     const patch = fs.readFileSync(path.join(home, ".apemind", "managed.cordis.yml"), "utf8")
     assert.match(patch, /dsh-mcp-client/)
+    assert.match(patch, /id: xmanrui-dsh-im/)
+    assert.match(patch, /rpcAuthority: trusted-host/)
     assert.match(patch, /http:\/\/mcp\.test\/mcp/)
     assert.doesNotMatch(patch, /sk-test-123/, "the key must stay out of the patch file")
     const probe = JSON.parse(fs.readFileSync(path.join(home, ".apemind", "probe.json"), "utf8"))
@@ -213,7 +216,10 @@ test("llm projection without models keeps the provider row out of the patch", as
       APEMIND_LLM_MODELS: "[]",
     })
     const home = path.join(env.cfg.dataDir, "users", "iris")
-    assert.equal(fs.existsSync(path.join(home, ".apemind", "managed.cordis.yml")), false)
+    const patch = fs.readFileSync(path.join(home, ".apemind", "managed.cordis.yml"), "utf8")
+    assert.match(patch, /id: xmanrui-dsh-im/)
+    assert.doesNotMatch(patch, /llm-pi-ai/)
+    assert.doesNotMatch(patch, /dsh-mcp-client/)
   } finally {
     await env.cleanup()
   }
@@ -307,5 +313,37 @@ test("state survives a supervisor restart via meta.json", async () => {
     await sup2.shutdown()
   } finally {
     await env.cleanup()
+  }
+})
+
+test("start copies the baked dsh-im plugin into the tenant web profile", async () => {
+  const seed = fs.mkdtempSync(path.join(os.tmpdir(), "dsh-im-host-seed-"))
+  try {
+    const seedWeb = path.join(seed, "profiles", "web")
+    fs.mkdirSync(path.join(seedWeb, "node_modules", "@xmanrui", "dsh-im"), { recursive: true })
+    fs.writeFileSync(path.join(seedWeb, "node_modules", "@xmanrui", "dsh-im", "index.js"), "ok\n")
+    fs.writeFileSync(
+      path.join(seedWeb, "package.json"),
+      `${JSON.stringify({ name: "dsh-profile-web", dependencies: { "@xmanrui/dsh-im": "4.8.0" } }, null, 2)}\n`,
+    )
+    const env = await makeEnv({ COMPUTER_DSH_IM_SEED: seed })
+    try {
+      await env.sup.ensure("mina", "running")
+      const pkgPath = path.join(env.cfg.dataDir, "users", "mina", ".dsh", "profiles", "web", "package.json")
+      const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"))
+      assert.equal(pkg.dependencies["@xmanrui/dsh-im"], "4.8.0")
+      assert.ok(pkg.dsh.profile.bundles.includes("@xmanrui/dsh-im"))
+      assert.equal(
+        fs.readFileSync(
+          path.join(env.cfg.dataDir, "users", "mina", ".dsh", "profiles", "web", "node_modules", "@xmanrui", "dsh-im", "index.js"),
+          "utf8",
+        ),
+        "ok\n",
+      )
+    } finally {
+      await env.cleanup()
+    }
+  } finally {
+    fs.rmSync(seed, { recursive: true, force: true })
   }
 })
