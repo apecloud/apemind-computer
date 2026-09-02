@@ -8,7 +8,7 @@
 # （两边配同一个值）加一道门。
 services:
   computer-host:
-    image: apecloud/apemind-computer:v0.2.0
+    image: apecloud/apemind-computer:v0.2.8
     restart: unless-stopped
     environment:
       # 浏览器访问网关用的对外地址（决定 Origin 校验与 cookie Secure 属性）
