@@ -22,7 +22,7 @@
 host-agent/   Node 服务（TypeScript，零运行时依赖，esbuild 打成单文件）
   src/        gateway / control / supervisor / ticket / config
   test/       node:test 单元与集成测试（内置 fake dsh）
-docs/         架构（architecture.md）、生命周期（lifecycle.md）、稳定性（stability.md）、配对与认证（pairing.md）、宿主运营配置（host-settings.md）、ApeMind 能力结合（apemind-integration.md）
+docs/         架构（architecture.md）、生命周期（lifecycle.md）、稳定性（stability.md）、配对与认证（pairing.md）、宿主运营配置（host-settings.md）、ApeMind 能力结合（apemind-integration.md）、LTS（lts.md）
 tests/vectors 票据 golden vectors（Python 生成，双端测试共用）
 deploy/       Kubernetes Helm chart（独立发布，不绑 ApeMind 主 chart）
 Dockerfile    运行镜像（node:22-bookworm-slim + 锁版本 dsh + apemind CLI + host-agent）
@@ -72,6 +72,18 @@ Dockerfile 的 `DSH_VERSION` 中锁定；`pnpm` 由 `corepack` 按 `PNPM_VERSION
 放到 PATH（`dsh plugin` 需要它）；`apemind` CLI 同样构建时锁版本 + sha256，
 装到 `/usr/local/bin/apemind`（运行期零下载）。升级 dsh、pnpm 或 CLI 一律走新镜像
 tag 加回归验证。租户 HOME 与 CLI 身份注入见 [docs/lifecycle.md](docs/lifecycle.md) §1。
+
+当前发布 tag 是 `v0.2.8`。离线机先在联网环境导出镜像再 `docker load`：
+
+```bash
+docker pull apecloud/apemind-computer:v0.2.8
+docker save apecloud/apemind-computer:v0.2.8 -o apemind-computer-v0.2.8.tar
+docker load -i apemind-computer-v0.2.8.tar
+```
+
+Compose 样例见 `compose.example.yml`。ApeMind 离线交付把本组件放在
+`deploy/components/computer`，不进入核心默认安装。LTS 分支与发版规则见
+[docs/lts.md](docs/lts.md)。
 
 ## Kubernetes
 
