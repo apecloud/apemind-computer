@@ -3,5 +3,7 @@
   "session_ttl_sec": 7200,
   "ready_timeout_sec": 90,
   "stop_grace_sec": 10,
-  "max_instances": 200
+  "max_instances": 200,
+  "instance_memory_max_mb": 2048,
+  "instance_pids_max": 512
 }

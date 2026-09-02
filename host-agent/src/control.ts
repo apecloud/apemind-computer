@@ -196,6 +196,7 @@ export class Control {
       if (wantsSettings) {
         try {
           this.sup.settings.applyPatch(record.settings)
+          this.sup.applyInstanceLimits()
         } catch (err) {
           if (err instanceof SettingsError) {
             sendJson(res, 400, { error: err.message })

@@ -294,7 +294,8 @@ test("state survives a supervisor restart via meta.json", async () => {
 
     const { Supervisor } = await import("../src/supervisor.ts")
     const { loadHostSettings } = await import("../src/settings.ts")
-    const sup2 = new Supervisor(env.cfg, loadHostSettings(env.cfg.dataDir))
+    const { CgroupManager } = await import("../src/cgroup.ts")
+    const sup2 = new Supervisor(env.cfg, loadHostSettings(env.cfg.dataDir), CgroupManager.unavailable())
     await sup2.init()
     const view = sup2.getView("grace")
     assert.ok(view)

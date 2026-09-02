@@ -27,6 +27,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     unzip \
     && rm -rf /var/lib/apt/lists/*
 
+COPY host-agent/src/native/dsh-exec.c /tmp/dsh-exec.c
+RUN gcc -O2 -o /usr/local/bin/dsh-exec /tmp/dsh-exec.c \
+    && chmod 0755 /usr/local/bin/dsh-exec \
+    && rm /tmp/dsh-exec.c
+
 # dsh is pinned; upgrades go through a new image tag and regression run.
 ARG DSH_VERSION=0.1.1-rc.2
 RUN npm install -g @deepseek-ai/dsh@${DSH_VERSION} && npm cache clean --force

@@ -191,7 +191,7 @@ cgroup v2：一个节点一旦打开控制器，自己身上就不能再挂进�
 
 - 不把 host-agent 做成多副本高可用（单副本 + PVC + Recreate 是当前部署事实）。
 - 不保证 host-agent 重启期间网关零中断。
-- 不在本文落地进程组 / cgroup 代码；口径先定，实现另开。
+- 进程组 / cgroup 已按本文落地：检测失败降级，不把容器改成 privileged。
 - 不讨论把 dsh 拆成 per-user Pod / microVM。
 - 不做每户不同的内存套餐，也不把容器改成 privileged。
 - 不保证纸面超卖之后整容器永不 OOM。

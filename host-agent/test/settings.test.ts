@@ -254,6 +254,23 @@ test("PUT settings leaves host.json pairing bytes unchanged", async () => {
   }
 })
 
+test("limit settings accept max and reject zero", async () => {
+  const dir = await tmpDir()
+  try {
+    const store = loadHostSettings(dir, FACTORY_FILE)
+    store.applyPatch({ instance_memory_max_mb: "max", instance_pids_max: 1024 })
+    assert.equal(store.snapshot().instance_memory_max_mb, "max")
+    assert.equal(store.snapshot().instance_pids_max, 1024)
+    assert.throws(() => store.applyPatch({ instance_memory_max_mb: 0 }), /out of range/)
+    assert.throws(() => store.applyPatch({ instance_pids_max: 0 }), /out of range/)
+    assert.throws(() => store.applyPatch({ instance_memory_max_mb: "unlimited" }), SettingsError)
+    store.applyPatch({ instance_memory_max_mb: null })
+    assert.equal(store.snapshot().instance_memory_max_mb, FACTORY_SETTINGS.instance_memory_max_mb)
+  } finally {
+    await fsp.rm(dir, { recursive: true, force: true })
+  }
+})
+
 test("applyPatch rejects unknown keys without writing", async () => {
   const dir = await tmpDir()
   try {
