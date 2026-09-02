@@ -237,7 +237,7 @@ managed key 的生命周期在 ApeMind 侧：`api_key` 表里 `is_managed=true, 
 
 | 参数 | 默认 | 语义 |
 | --- | --- | --- |
-| `COMPUTER_IDLE_TIMEOUT_SEC` | 1800 | 无流量多久停进程（0 关闭回收）；扫描周期固定 60s |
+| `COMPUTER_IDLE_TIMEOUT_SEC` | 1800 | 无流量多久停进程（0 关闭回收）；扫描周期固定 60s。热改方案见 [host-settings.md](host-settings.md) |
 | `COMPUTER_READY_TIMEOUT_SEC` | 90 | 冷启动就绪窗口；探测间隔 300ms |
 | `COMPUTER_STOP_GRACE_SEC` | 10 | SIGTERM 后宽限，超时 SIGKILL |
 | `COMPUTER_SESSION_TTL_SEC` | 7200（2h） | 会话 cookie 寿命；实例被 `revoke-sessions` 后立刻整体失效 |
@@ -262,5 +262,6 @@ managed key 的生命周期在 ApeMind 侧：`api_key` 表里 `is_managed=true, 
 - `.apemind/`、`.dsh/`、`workspace/`、镜像层 CLI 分别归谁写，删实例时哪些数据消失？
 - 「闲置休眠」和「用户主动停止」在状态机里差在哪个字段？各自怎么恢复？
 - 为什么不需要心跳？活跃度信号从哪来，多久无流量会停，唤醒发生在哪一层？
+- 闲置超时的权威在 env 还是磁盘，控制面怎么改（host-settings.md）？
 - 组织实例换人打开后，绑定身份会不会换成那个成员？MCP / CLI 用的是谁？
 - host-agent 容器重启后，正在休眠/运行的实例分别经历什么？

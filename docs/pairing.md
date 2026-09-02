@@ -77,7 +77,7 @@
 /data/host.json     0600
 ```
 
-未配对：`{"state":"unpaired"}`。没有码要生成，也没有东西要人拷。
+未配对：`{"state":"unpaired"}`。没有码要生成，也没有东西要人拷。运营旋钮不进本文件，方案见 [host-settings.md](host-settings.md)。
 
 已配对（密钥仅示意形状，真实值不进日志、不进任何 GET）：
 

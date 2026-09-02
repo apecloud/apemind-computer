@@ -147,7 +147,7 @@ sequenceDiagram
 
 - `POST /v1/pair`：未配对时绑定控制面，换出长期令牌与签票密钥（唯一不要求 Bearer 的写接口，防浏览器校验见 pairing.md §5.1）。
 - `GET /v1/runtime`：未配对无鉴权回 `{state, public_origin, version}`；已配对需 Bearer，另回 `main_url` / `paired_at`。
-- `PUT /v1/runtime`：更新 `main_url`；`POST /v1/unpair`：解除配对。
+- `PUT /v1/runtime`：更新 `main_url`；`POST /v1/unpair`：解除配对。闲置超时等运营旋钮的热更新方案见 [host-settings.md](host-settings.md)，落地后扩同一对接口。
 - `PUT /v1/instances/{user_id}`：幂等 ensure。路径参数名仍是 `user_id`，值是不透明实例键（ApeMind 的 `computer_instance.id`）。body `{desired: running|stopped, env?: {APEMIND_API_KEY, APEMIND_BASE_URL, …}}`。同步返回 `{status, port, started_at, last_activity}`。
 - `GET /v1/instances/{user_id}`、`GET /v1/instances`：状态（running/stopped/error、RSS、last_activity）。
 - `DELETE /v1/instances/{user_id}`：停进程 + 删工作区（重置）。
@@ -214,5 +214,6 @@ AIO 底座（Xvfb/Chromium/VNC/noVNC/supervisord/nginx/gem-server/tinyproxy/bubb
 - 短票和会话 cookie 各自活多久、字段是什么？
 - 控制 API 有哪些端点、鉴权是什么？
 - 密钥如何从「两处手填」换成配对交换（pairing.md）？
+- 闲置超时等运营旋钮存在哪、怎么热改（host-settings.md）？
 - 为什么不写 dsh plugin？
 - 回环隔离要防的是哪一种串访？

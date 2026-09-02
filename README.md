@@ -22,7 +22,7 @@
 host-agent/   Node 服务（TypeScript，零运行时依赖，esbuild 打成单文件）
   src/        gateway / control / supervisor / ticket / config
   test/       node:test 单元与集成测试（内置 fake dsh）
-docs/         架构（architecture.md）、生命周期（lifecycle.md）、配对与认证（pairing.md）、ApeMind 能力结合（apemind-integration.md）
+docs/         架构（architecture.md）、生命周期（lifecycle.md）、配对与认证（pairing.md）、宿主运营配置（host-settings.md）、ApeMind 能力结合（apemind-integration.md）
 tests/vectors 票据 golden vectors（Python 生成，双端测试共用）
 deploy/       Kubernetes Helm chart（独立发布，不绑 ApeMind 主 chart）
 Dockerfile    运行镜像（node:22-bookworm-slim + 锁版本 dsh + apemind CLI + host-agent）
