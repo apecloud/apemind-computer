@@ -237,7 +237,7 @@ managed key 的生命周期在 ApeMind 侧：`api_key` 表里 `is_managed=true, 
 
 | 参数 | 默认 | 语义 |
 | --- | --- | --- |
-| `COMPUTER_IDLE_TIMEOUT_SEC` | 1800 | 无流量多久停进程（0 关闭回收）；扫描周期固定 60s。热改方案见 [host-settings.md](host-settings.md) |
+| `COMPUTER_IDLE_TIMEOUT_SEC` | 1800 | 今日仍是启动 env。落地后该 env 删除，改走完整 `settings.json`，见 [host-settings.md](host-settings.md) |
 | `COMPUTER_READY_TIMEOUT_SEC` | 90 | 冷启动就绪窗口；探测间隔 300ms |
 | `COMPUTER_STOP_GRACE_SEC` | 10 | SIGTERM 后宽限，超时 SIGKILL |
 | `COMPUTER_SESSION_TTL_SEC` | 7200（2h） | 会话 cookie 寿命；实例被 `revoke-sessions` 后立刻整体失效 |
