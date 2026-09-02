@@ -23,6 +23,8 @@ export interface Config {
   uidBase: number
   /** Requires uidBase > 0 and NET_ADMIN; installs loopback iptables rules per instance. */
   loopbackIsolation: boolean
+  /** Optional helper that sets PR_SET_PDEATHSIG + a new process group before exec. */
+  dshExec: string
   version: string
 }
 
@@ -61,6 +63,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     dshCommand: (env.COMPUTER_DSH_COMMAND ?? "dsh {patch} --profile web --no-open --port {port}").split(/\s+/).filter(Boolean),
     uidBase: intEnv(env, "COMPUTER_UID_BASE", 0),
     loopbackIsolation: (env.COMPUTER_LOOPBACK_ISOLATION ?? "").trim() === "1",
+    dshExec: (env.COMPUTER_DSH_EXEC ?? "/usr/local/bin/dsh-exec").trim(),
     version: env.COMPUTER_VERSION ?? "dev",
   }
 }

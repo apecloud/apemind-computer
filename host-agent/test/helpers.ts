@@ -4,6 +4,7 @@ import * as path from "node:path"
 import { fileURLToPath } from "node:url"
 import { loadConfig, type Config } from "../src/config.ts"
 import { HostIdentity } from "../src/hoststate.ts"
+import { CgroupManager } from "../src/cgroup.ts"
 import { FACTORY_SETTINGS, loadHostSettings, type HostSettings, type HostSettingsStore } from "../src/settings.ts"
 import { Supervisor } from "../src/supervisor.ts"
 
@@ -50,7 +51,7 @@ export async function makeEnv(
     ...overrides,
   })
   const settings = loadHostSettings(dataDir)
-  const sup = new Supervisor(cfg, settings)
+  const sup = new Supervisor(cfg, settings, CgroupManager.unavailable())
   await sup.init()
   return {
     cfg,

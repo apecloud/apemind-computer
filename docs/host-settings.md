@@ -22,13 +22,13 @@ host-agent 启动时 `loadConfig()` 把全部 `COMPUTER_*` 读进内存，之后
 
 ## 2. 目标
 
-- **运营旋钮只有一份权威：`/data/settings.json`。** 五个字段必须同时在，数值就是生效值。看文件等于看配置，和看一份 values YAML 一样。
+- **运营旋钮只有一份权威：`/data/settings.json`。** 七个字段必须同时在，数值就是生效值。看文件等于看配置，和看一份 values YAML 一样。
 - **镜像带出厂完整文件。** 数据卷上还没有这份文件时，启动从镜像拷一份过去，不读 env 拼默认。
 - **删掉这五个旋钮的环境变量。** Helm / compose 同步删；装机定制走文件或配对后的控制 API，不走 env。
 - **控制 API 改完写盘并替换内存**，不轮询、不 SIGHUP、不热读 `.env`。
 - **配对密钥仍在 `host.json`，不和旋钮混写。**
 - **ApeMind 不是回收判定的真源。** 管理页 GET/PUT runtime；`computer.host` 最多记上次下发副本。
-- **第一期管理页只暴露闲置秒数。** 其余字段接口里一起带齐，页面先不放开。
+- **管理页带齐全部旋钮。** 每户内存/进程数顶可以填正整数或 `max`。
 
 ## 3. 两层配置
 
@@ -67,7 +67,9 @@ host-agent 启动时 `loadConfig()` 把全部 `COMPUTER_*` 读进内存，之后
   "session_ttl_sec": 7200,
   "ready_timeout_sec": 90,
   "stop_grace_sec": 10,
-  "max_instances": 200
+  "max_instances": 200,
+  "instance_memory_max_mb": 2048,
+  "instance_pids_max": 512
 }
 ```
 
@@ -75,7 +77,7 @@ host-agent 启动时 `loadConfig()` 把全部 `COMPUTER_*` 读进内存，之后
 
 ```
 /data/host.json        0600   配对身份（pairing.md §4）
-/data/settings.json    0600   运营旋钮，五个字段必须齐
+/data/settings.json    0600   运营旋钮，七个字段必须齐
 /data/users/<key>/     …      租户 HOME
 ```
 
@@ -88,7 +90,7 @@ host-agent 启动时 `loadConfig()` 把全部 `COMPUTER_*` 读进内存，之后
 
 写盘与 `host.json` 相同：同目录临时文件 + `rename`。禁止往这份文件写令牌、签票密钥、`main_url`。
 
-进程跑起来之后，内存里的旋钮与文件字节级对应（五个整数）。运维 `cat /data/settings.json` 看到的就是正在用的值。
+进程跑起来之后，内存里的旋钮与文件字节级对应。五个时间/容量键是整数；每户限额两个键是正整数或字面量 `"max"`。运维 `cat /data/settings.json` 看到的就是正在用的值。
 
 装机时若 Helm 需要非出厂值：挂一份完整的 settings 到数据卷（或配对后 `PUT`）。不要再提供「只改某一个 env」。compose 示例同样删掉那五个环境变量。
 
@@ -118,16 +120,18 @@ host-agent 启动时 `loadConfig()` 把全部 `COMPUTER_*` 读进内存，之后
     "session_ttl_sec": 7200,
     "ready_timeout_sec": 90,
     "stop_grace_sec": 10,
-    "max_instances": 200
+    "max_instances": 200,
+    "instance_memory_max_mb": 2048,
+    "instance_pids_max": 512
   }
 }
 ```
 
-`settings` 五个键必须都在，没有 `*_source`。GET 不回令牌或签票密钥。
+`settings` 七个键必须都在，没有 `*_source`。GET 不回令牌或签票密钥。
 
 ### 6.2 `PUT /v1/runtime`
 
-补丁：省略的字段保持文件里的值；`null` 表示该字段回到**镜像出厂值**（不是删键）。写回后文件仍然五个键齐全。
+补丁：省略的字段保持文件里的值；`null` 表示该字段回到**镜像出厂值**（不是删键）。写回后文件仍然七个键齐全。
 
 ```json
 {
@@ -144,7 +148,7 @@ host-agent 启动时 `loadConfig()` 把全部 `COMPUTER_*` 读进内存，之后
 - `settings` 省略：只按今天规则处理 `main_url`（旧客户端兼容）。
 - `settings` 为空对象：旋钮全不动。
 - 未知键：整次 400，磁盘与内存不动。
-- 非 `null` 且非合法整数：整次 400。
+- 非 `null` 且类型/范围不合法：整次 400。每户限额只收正整数或 `"max"`，`0` 也是 400。
 
 | 字段 | 最小 | 最大 | `0` 的含义 | 出厂 |
 | --- | --- | --- | --- | --- |
@@ -153,6 +157,8 @@ host-agent 启动时 `loadConfig()` 把全部 `COMPUTER_*` 读进内存，之后
 | `ready_timeout_sec` | 5 | 300 | 不允许 | 90 |
 | `stop_grace_sec` | 1 | 120 | 不允许 | 10 |
 | `max_instances` | 1 | 10000 | 不允许 | 200 |
+| `instance_memory_max_mb` | 1 | 1048576 | 不允许；不限制填 `"max"` | 2048 |
+| `instance_pids_max` | 1 | 1000000 | 不允许；不限制填 `"max"` | 512 |
 
 越界 → 400，`{error: "<field> out of range"}`。
 
@@ -169,6 +175,8 @@ host-agent 启动时 `loadConfig()` 把全部 `COMPUTER_*` 读进内存，之后
 | `ready_timeout_sec` | 下一次冷启动 / 唤醒。 |
 | `stop_grace_sec` | 下一次 SIGTERM 宽限。 |
 | `max_instances` | 下一次要新占槽位的 `ensure`。下调不杀已有实例，只拦超员新开（507）。 |
+| `instance_memory_max_mb` | 立刻写到已有实例的 cgroup；用超了内核马上杀。检测不到 cgroup 则只记文件。 |
+| `instance_pids_max` | 同上。 |
 
 不通知 dsh。dsh 无配置协议。
 
@@ -208,10 +216,10 @@ host-agent 启动时 `loadConfig()` 把全部 `COMPUTER_*` 读进内存，之后
 
 ## 11. 验收
 
-1. 空数据卷启动后 `/data/settings.json` 与镜像出厂文件五个键、值都相同。
+1. 空数据卷启动后 `/data/settings.json` 与镜像出厂文件七个键、值都相同。
 2. 已配对 PUT `idle_timeout_sec=60`，GET 与文件都是 60，其余四键仍在；60～120 秒无流量则停进程，`desired` 仍 running，cookie 能唤醒。
 3. PUT `idle_timeout_sec=0` 后不再因闲置新停。
-4. PUT `idle_timeout_sec=null` 后文件该键为 1800，五个键仍齐。
+4. PUT `idle_timeout_sec=null` 后文件该键为 1800，七个键仍齐。
 5. 未知键 / 越界 → 400，文件不变。
 6. 多次 PUT 后 `host.json` 令牌字节级不变。
 7. 设了已删除的 `COMPUTER_IDLE_TIMEOUT_SEC=60` 再启动，生效值仍是文件里的数，不是 60。

@@ -4,6 +4,7 @@ import * as fs from "node:fs"
 import * as fsp from "node:fs/promises"
 import * as net from "node:net"
 import * as path from "node:path"
+import { CgroupManager } from "./cgroup.ts"
 import type { Config } from "./config.ts"
 import type { HostSettingsStore } from "./settings.ts"
 import { log } from "./log.ts"
@@ -51,6 +52,7 @@ export class CapacityError extends Error {}
 export class StartError extends Error {}
 
 const MAX_CONSECUTIVE_FAILURES = 5
+const MAX_STARTUP_FAILURES = 2
 const READY_PROBE_INTERVAL_MS = 300
 
 function readRssBytes(pid: number): number | undefined {
@@ -195,14 +197,16 @@ function renderAgentsGuide(env: Record<string, string>): string | undefined {
 export class Supervisor {
   private readonly cfg: Config
   readonly settings: HostSettingsStore
+  private readonly cgroup: CgroupManager
   private readonly instances = new Map<string, Instance>()
   private readonly reservedPorts = new Set<number>()
   private sweepTimer?: NodeJS.Timeout
   private shuttingDown = false
 
-  constructor(cfg: Config, settings: HostSettingsStore) {
+  constructor(cfg: Config, settings: HostSettingsStore, cgroup?: CgroupManager) {
     this.cfg = cfg
     this.settings = settings
+    this.cgroup = cgroup ?? CgroupManager.open()
   }
 
   private usersDir(): string {
@@ -342,9 +346,17 @@ export class Supervisor {
     await this.stopProcess(inst)
     await this.removeLoopbackRules(inst)
     this.instances.delete(userId)
+    this.cgroup.removeInstance(userId)
     await fsp.rm(this.homeDir(userId), { recursive: true, force: true })
     log.info("instance removed", { user: userId })
     return true
+  }
+
+  applyInstanceLimits(): void {
+    const snapshot = this.settings.snapshot()
+    for (const inst of this.instances.values()) {
+      this.cgroup.applyLimits(inst.userId, snapshot)
+    }
   }
 
   async shutdown(): Promise<void> {
@@ -519,15 +531,19 @@ export class Supervisor {
     }
     const logStream = fs.createWriteStream(path.join(home, ".apemind", "dsh.log"), { flags: "a", mode: 0o600 })
     inst.error = undefined
-    log.info("starting dsh", { user: inst.userId, port })
-    const proc = spawn(argv[0], argv.slice(1), {
+    this.cgroup.prepareInstance(inst.userId, this.settings.snapshot())
+    const helper = this.cfg.dshExec && fs.existsSync(this.cfg.dshExec) ? this.cfg.dshExec : undefined
+    log.info("starting dsh", { user: inst.userId, port, helper: helper !== undefined })
+    const proc = spawn(helper ?? argv[0], helper ? ["--", ...argv] : argv.slice(1), {
       cwd: path.join(home, "workspace"),
       env,
       stdio: ["ignore", "pipe", "pipe"],
       uid: inst.meta.uid,
       gid: inst.meta.uid,
+      detached: helper === undefined,
     })
     inst.proc = proc
+    if (proc.pid !== undefined) this.cgroup.attach(inst.userId, proc.pid)
     proc.stdout?.pipe(logStream, { end: false })
     proc.stderr?.pipe(logStream, { end: false })
     proc.on("exit", (code, signal) => {
@@ -558,8 +574,33 @@ export class Supervisor {
     }
     inst.status = "error"
     inst.error = "dsh did not become ready in time"
-    proc.kill("SIGKILL")
+    signalProcess(proc, "SIGKILL")
     throw new StartError(inst.error)
+  }
+
+  private exitReason(inst: Instance, code: number | null, signal: string | null, when: "startup" | "running"): string {
+    const oom = this.cgroup.oomKills(inst.userId)
+    if (oom > 0) {
+      return when === "startup"
+        ? `dsh oom-killed during startup (oom_kill=${oom})`
+        : `dsh oom-killed (oom_kill=${oom}, code=${code}, signal=${signal})`
+    }
+    return when === "startup"
+      ? `dsh exited during startup (code=${code}, signal=${signal})`
+      : `dsh crashed (code=${code}, signal=${signal})`
+  }
+
+  private scheduleRestart(inst: Instance, code: number | null, signal: string | null): void {
+    const backoffMs = Math.min(500 * 2 ** inst.consecutiveFailures, 30_000)
+    inst.status = "stopped"
+    log.warn("dsh exited, scheduling restart", { user: inst.userId, code, signal, backoffMs, error: inst.error })
+    inst.restartTimer = setTimeout(() => {
+      inst.restartTimer = undefined
+      if (inst.meta.desired === "running" && inst.status === "stopped") {
+        void this.start(inst).catch((err) => log.error("restart failed", { user: inst.userId, err: String(err) }))
+      }
+    }, backoffMs)
+    inst.restartTimer.unref()
   }
 
   private onExit(inst: Instance, proc: ChildProcess, code: number | null, signal: string | null): void {
@@ -572,28 +613,24 @@ export class Supervisor {
       return
     }
     if (inst.status === "starting") {
+      inst.consecutiveFailures += 1
+      inst.error = this.exitReason(inst, code, signal, "startup")
+      if (inst.meta.desired === "running" && inst.consecutiveFailures <= MAX_STARTUP_FAILURES) {
+        this.scheduleRestart(inst, code, signal)
+        return
+      }
       inst.status = "error"
-      inst.error = `dsh exited during startup (code=${code}, signal=${signal})`
       return
     }
     if (wasRunning && inst.meta.desired === "running") {
       inst.consecutiveFailures += 1
+      inst.error = this.exitReason(inst, code, signal, "running")
       if (inst.consecutiveFailures > MAX_CONSECUTIVE_FAILURES) {
         inst.status = "error"
-        inst.error = `dsh crashed repeatedly (code=${code}, signal=${signal})`
-        log.error("instance gave up restarting", { user: inst.userId, code, signal })
+        log.error("instance gave up restarting", { user: inst.userId, code, signal, error: inst.error })
         return
       }
-      const backoffMs = Math.min(500 * 2 ** inst.consecutiveFailures, 30_000)
-      inst.status = "stopped"
-      log.warn("dsh exited, scheduling restart", { user: inst.userId, code, signal, backoffMs })
-      inst.restartTimer = setTimeout(() => {
-        inst.restartTimer = undefined
-        if (inst.meta.desired === "running" && inst.status === "stopped") {
-          void this.start(inst).catch((err) => log.error("restart failed", { user: inst.userId, err: String(err) }))
-        }
-      }, backoffMs)
-      inst.restartTimer.unref()
+      this.scheduleRestart(inst, code, signal)
       return
     }
     inst.status = "stopped"
@@ -618,10 +655,10 @@ export class Supervisor {
     }
     inst.stopping = true
     try {
-      proc.kill("SIGTERM")
+      signalProcess(proc, "SIGTERM")
       const exited = await Promise.race([once(proc, "exit").then(() => true), sleep(this.settings.snapshot().stop_grace_sec * 1000).then(() => false)])
       if (!exited) {
-        proc.kill("SIGKILL")
+        signalProcess(proc, "SIGKILL")
         await once(proc, "exit")
       }
     } finally {
@@ -673,6 +710,20 @@ export class Supervisor {
     const uid = String(inst.meta.uid)
     await runIptables(["-D", "OUTPUT", "-o", "lo", "-p", "tcp", "--dport", port, "-m", "owner", "--uid-owner", uid, "-j", "ACCEPT"])
     await runIptables(["-D", "OUTPUT", "-o", "lo", "-p", "tcp", "--dport", port, "-m", "owner", "!", "--uid-owner", String(process.getuid?.() ?? 0), "-j", "REJECT"])
+  }
+}
+
+function signalProcess(proc: ChildProcess, signal: NodeJS.Signals): void {
+  const pid = proc.pid
+  if (pid === undefined) return
+  try {
+    process.kill(-pid, signal)
+  } catch {
+    try {
+      proc.kill(signal)
+    } catch {
+      // already gone
+    }
   }
 }
 

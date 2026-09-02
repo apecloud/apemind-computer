@@ -5,7 +5,7 @@ import { log } from "./log.ts"
 export const DEFAULT_FACTORY_PATH = "/usr/local/share/apemind-computer/settings.json"
 export const SETTINGS_FILENAME = "settings.json"
 
-export const SETTINGS_KEYS = [
+export const INTEGER_KEYS = [
   "idle_timeout_sec",
   "session_ttl_sec",
   "ready_timeout_sec",
@@ -13,7 +13,14 @@ export const SETTINGS_KEYS = [
   "max_instances",
 ] as const
 
+export const LIMIT_KEYS = ["instance_memory_max_mb", "instance_pids_max"] as const
+
+export const SETTINGS_KEYS = [...INTEGER_KEYS, ...LIMIT_KEYS] as const
+
+export type IntegerKey = (typeof INTEGER_KEYS)[number]
+export type LimitKey = (typeof LIMIT_KEYS)[number]
 export type SettingsKey = (typeof SETTINGS_KEYS)[number]
+export type LimitValue = number | "max"
 
 export type HostSettings = {
   idle_timeout_sec: number
@@ -21,6 +28,8 @@ export type HostSettings = {
   ready_timeout_sec: number
   stop_grace_sec: number
   max_instances: number
+  instance_memory_max_mb: LimitValue
+  instance_pids_max: LimitValue
 }
 
 export const FACTORY_SETTINGS: HostSettings = {
@@ -29,14 +38,21 @@ export const FACTORY_SETTINGS: HostSettings = {
   ready_timeout_sec: 90,
   stop_grace_sec: 10,
   max_instances: 200,
+  instance_memory_max_mb: 2048,
+  instance_pids_max: 512,
 }
 
-const RANGES: Record<SettingsKey, { min: number; max: number }> = {
+const INTEGER_RANGES: Record<IntegerKey, { min: number; max: number }> = {
   idle_timeout_sec: { min: 0, max: 86400 },
   session_ttl_sec: { min: 60, max: 604800 },
   ready_timeout_sec: { min: 5, max: 300 },
   stop_grace_sec: { min: 1, max: 120 },
   max_instances: { min: 1, max: 10000 },
+}
+
+const LIMIT_RANGES: Record<LimitKey, { min: number; max: number }> = {
+  instance_memory_max_mb: { min: 1, max: 1_048_576 },
+  instance_pids_max: { min: 1, max: 1_000_000 },
 }
 
 export class SettingsError extends Error {
@@ -50,15 +66,36 @@ function isSettingsKey(value: string): value is SettingsKey {
   return (SETTINGS_KEYS as readonly string[]).includes(value)
 }
 
-function parseIntegerField(key: SettingsKey, value: unknown): number {
+function isIntegerKey(value: SettingsKey): value is IntegerKey {
+  return (INTEGER_KEYS as readonly string[]).includes(value)
+}
+
+function parseIntegerField(key: IntegerKey, value: unknown): number {
   if (typeof value !== "number" || !Number.isInteger(value)) {
     throw new SettingsError(`${key} must be an integer`)
   }
-  const range = RANGES[key]
+  const range = INTEGER_RANGES[key]
   if (value < range.min || value > range.max) {
     throw new SettingsError(`${key} out of range`)
   }
   return value
+}
+
+function parseLimitField(key: LimitKey, value: unknown): LimitValue {
+  if (value === "max") return "max"
+  if (typeof value !== "number" || !Number.isInteger(value)) {
+    throw new SettingsError(`${key} must be a positive integer or "max"`)
+  }
+  const range = LIMIT_RANGES[key]
+  if (value < range.min || value > range.max) {
+    throw new SettingsError(`${key} out of range`)
+  }
+  return value
+}
+
+function parseField(key: SettingsKey, value: unknown): HostSettings[typeof key] {
+  if (isIntegerKey(key)) return parseIntegerField(key, value)
+  return parseLimitField(key, value)
 }
 
 function parseCompleteSettings(raw: unknown): HostSettings | null {
@@ -68,12 +105,20 @@ function parseCompleteSettings(raw: unknown): HostSettings | null {
   for (const key of SETTINGS_KEYS) {
     if (!(key in record)) return null
     try {
-      next[key] = parseIntegerField(key, record[key])
+      assign(next, key, parseField(key, record[key]))
     } catch {
       return null
     }
   }
   return next
+}
+
+function assign(target: HostSettings, key: SettingsKey, value: HostSettings[SettingsKey]): void {
+  if (isIntegerKey(key)) {
+    target[key] = value as number
+    return
+  }
+  target[key] = value as LimitValue
 }
 
 function readFactory(factoryPath: string): HostSettings {
@@ -124,7 +169,7 @@ function loadOrRepair(file: string, factory: HostSettings): HostSettings {
       continue
     }
     try {
-      next[key] = parseIntegerField(key, record[key])
+      assign(next, key, parseField(key, record[key]))
     } catch (err) {
       log.error("settings.json field is invalid; replacing with factory settings", {
         file,
@@ -164,10 +209,10 @@ export class HostSettingsStore {
       if (!isSettingsKey(key)) throw new SettingsError(`unknown setting: ${key}`)
       const value = record[key]
       if (value === null) {
-        next[key] = this.factory[key]
+        assign(next, key, this.factory[key])
         continue
       }
-      next[key] = parseIntegerField(key, value)
+      assign(next, key, parseField(key, value))
     }
     writeAtomic(this.filePath, next)
     this.current = next
