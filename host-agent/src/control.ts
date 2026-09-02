@@ -4,6 +4,7 @@ import * as os from "node:os"
 import type { Config } from "./config.ts"
 import { AlreadyPairedError, HostIdentity, NotFilePairedError } from "./hoststate.ts"
 import { log } from "./log.ts"
+import { SettingsError } from "./settings.ts"
 import { CapacityError, StartError, Supervisor, type Desired } from "./supervisor.ts"
 import { USER_ID_RE } from "./ticket.ts"
 
@@ -88,6 +89,7 @@ export class Control {
     if (this.identity.isPaired) {
       view.main_url = this.identity.mainUrl
       if (this.identity.pairedAt) view.paired_at = this.identity.pairedAt
+      view.settings = this.sup.settings.snapshot()
     }
     return view
   }
@@ -176,19 +178,42 @@ export class Control {
         sendJson(res, 400, { error: "invalid json body" })
         return
       }
-      const mainUrl = parseHttpUrl((body as Record<string, unknown>)?.main_url)
-      if (mainUrl === null) {
+      const record = (body ?? {}) as Record<string, unknown>
+      const wantsSettings = record.settings !== undefined
+      const wantsMain = record.main_url !== undefined
+      if (!wantsSettings && !wantsMain) {
         sendJson(res, 400, { error: "main_url must be an http(s) URL" })
         return
       }
-      try {
-        this.identity.setMainUrl(mainUrl)
-      } catch (err) {
-        if (err instanceof NotFilePairedError) {
-          sendJson(res, 409, { error: err.message })
+      let mainUrl: string | null = null
+      if (wantsMain) {
+        mainUrl = parseHttpUrl(record.main_url)
+        if (mainUrl === null) {
+          sendJson(res, 400, { error: "main_url must be an http(s) URL" })
           return
         }
-        throw err
+      }
+      if (wantsSettings) {
+        try {
+          this.sup.settings.applyPatch(record.settings)
+        } catch (err) {
+          if (err instanceof SettingsError) {
+            sendJson(res, 400, { error: err.message })
+            return
+          }
+          throw err
+        }
+      }
+      if (mainUrl !== null) {
+        try {
+          this.identity.setMainUrl(mainUrl)
+        } catch (err) {
+          if (err instanceof NotFilePairedError) {
+            sendJson(res, 409, { error: err.message })
+            return
+          }
+          throw err
+        }
       }
       sendJson(res, 200, this.runtimeView())
       return
@@ -212,7 +237,7 @@ export class Control {
       sendJson(res, 200, {
         version: this.cfg.version,
         public_origin: this.cfg.publicOrigin,
-        instances: { total: counts.total, running: counts.running, max: this.cfg.maxInstances },
+        instances: { total: counts.total, running: counts.running, max: this.sup.settings.snapshot().max_instances },
         load1: os.loadavg()[0],
         mem_free_bytes: os.freemem(),
       })

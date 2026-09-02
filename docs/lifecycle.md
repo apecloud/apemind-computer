@@ -75,8 +75,8 @@ stateDiagram-v2
 
 转换细节：
 
-- **启动就绪判定**：spawn 后每 300ms 探测一次回环端口，`COMPUTER_READY_TIMEOUT_SEC`（默认 90s）内通即 `running`；超时 SIGKILL 并抛 StartError（控制面收到 409）。ApeMind 的 ensure HTTP 超时 120s，就是为了盖住这 90s——**冷启动是同步阻塞的**，接口返回时实例已可用或已明确失败。
-- **停止**：SIGTERM，`COMPUTER_STOP_GRACE_SEC`（默认 10s）内没退干净则 SIGKILL。
+- **启动就绪判定**：spawn 后每 300ms 探测一次回环端口，`settings.json` 的 `ready_timeout_sec`（出厂 90s）内通即 `running`；超时 SIGKILL 并抛 StartError（控制面收到 409）。ApeMind 的 ensure HTTP 超时 120s，就是为了盖住这 90s——**冷启动是同步阻塞的**，接口返回时实例已可用或已明确失败。
+- **停止**：SIGTERM，`settings.json` 的 `stop_grace_sec`（出厂 10s）内没退干净则 SIGKILL。
 - **崩溃退避**：`running` 中的进程意外退出且 desired 仍是 running 时，按 `min(500ms × 2^n, 30s)` 退避自动重启；连续超过 5 次转 `error` 放弃。任何一次 ensure/wake 都会清零失败计数、重新尝试。
 - **端口是易耗品**：每次启动从 `COMPUTER_PORT_BASE`（默认 31000）向上找空闲端口，重启后端口可能变。会话 cookie 只含实例键不含端口，所以对用户透明。
 - **host-agent 重启**：`init()` 扫 `/data/users/` 逐个读 `meta.json` 恢复注册表，所有实例 status=stopped，**不主动拉起任何进程**；desired=running 的实例等第一个带合法 cookie 的请求把它唤醒。冷备恢复语义与闲置回收完全一致。
@@ -163,7 +163,7 @@ uid 隔离开启时以分配的 uid/gid 运行；stdout/stderr 进 `.apemind/dsh
 - WebSocket 双向任何数据帧都 touch（1 秒节流，避免热连接高频写时间戳）；
 - dsh 自己不上报任何东西，浏览器页面关闭 → WS 断 → 流量归零。
 
-回收循环：supervisor 每 60s 扫一遍，`status=running` 且 `now - lastActivity > COMPUTER_IDLE_TIMEOUT_SEC`（默认 1800s = 30 分钟）的实例停进程。**desired 保持 running**——这正是「休眠」和「用户主动停止」的区别。
+回收循环：supervisor 每 60s 扫一遍，`status=running` 且 `now - lastActivity > idle_timeout_sec`（出厂 1800s = 30 分钟，见 `/data/settings.json`）的实例停进程。**desired 保持 running**——这正是「休眠」和「用户主动停止」的区别。
 
 唤醒路径（网关内联完成，不经过 ApeMind）：
 
@@ -197,7 +197,7 @@ uid 隔离开启时以分配的 uid/gid 运行；stdout/stderr 进 `.apemind/dsh
 | 重置租户（无产品入口） | 运维直调 | `DELETE /v1/instances/{key}` | 停进程 + 删 HOME，204 |
 | 撤权（移出成员/改角色/停用组织） | 事务成功后 best-effort 调用 | `POST /v1/instances/{key}/revoke-sessions` | 会话代数 +1 落盘，存量会话 cookie 全部失效 |
 
-鉴权全部是 `Authorization: Bearer $COMPUTER_CONTROL_TOKEN`（常量时间比较）。错误映射：401 未认证、400 参数/实例键非法、404 实例不存在、409 启动失败（StartError）、507 容量满（实例数达 `COMPUTER_MAX_INSTANCES`或端口耗尽）。ApeMind 侧把非 200 统一包装成 ComputerHostErrorException 冒给前端。
+鉴权全部是 `Authorization: Bearer $COMPUTER_CONTROL_TOKEN`（常量时间比较）。错误映射：401 未认证、400 参数/实例键非法、404 实例不存在、409 启动失败（StartError）、507 容量满（实例数达 `max_instances` 或端口耗尽）。ApeMind 侧把非 200 统一包装成 ComputerHostErrorException 冒给前端。
 
 ## 4. 数据面：请求怎么流
 
@@ -237,12 +237,12 @@ managed key 的生命周期在 ApeMind 侧：`api_key` 表里 `is_managed=true, 
 
 | 参数 | 默认 | 语义 |
 | --- | --- | --- |
-| `COMPUTER_IDLE_TIMEOUT_SEC` | 1800 | 今日仍是启动 env。落地后该 env 删除，改走完整 `settings.json`，见 [host-settings.md](host-settings.md) |
-| `COMPUTER_READY_TIMEOUT_SEC` | 90 | 冷启动就绪窗口；探测间隔 300ms |
-| `COMPUTER_STOP_GRACE_SEC` | 10 | SIGTERM 后宽限，超时 SIGKILL |
-| `COMPUTER_SESSION_TTL_SEC` | 7200（2h） | 会话 cookie 寿命；实例被 `revoke-sessions` 后立刻整体失效 |
+| `idle_timeout_sec`（`/data/settings.json`） | 1800 | 闲置回收；`0` 关闭。热更新见 [host-settings.md](host-settings.md) |
+| `ready_timeout_sec` | 90 | 冷启动就绪窗口；探测间隔 300ms |
+| `stop_grace_sec` | 10 | SIGTERM 后宽限，超时 SIGKILL |
+| `session_ttl_sec` | 7200（2h） | 会话 cookie 寿命；实例被 `revoke-sessions` 后立刻整体失效 |
 | 短票 TTL | 60s（ApeMind 侧常量） | `/open/<ticket>` 兑换窗口，一次性 |
-| `COMPUTER_PORT_BASE` / `COMPUTER_MAX_INSTANCES` | 31000 / 200 | 回环端口段与容量上限 |
+| `COMPUTER_PORT_BASE` / `max_instances` | 31000 / 200 | 回环端口段与容量上限 |
 | `COMPUTER_UID_BASE` / `COMPUTER_LOOPBACK_ISOLATION` | 0（关）/ 关 | 每实例 uid 与回环 iptables 隔离；staging 开启（uidBase=20000） |
 | 崩溃退避 | min(500ms×2ⁿ, 30s)，连续 >5 次放弃 | 代码常量 |
 | ApeMind ensure HTTP 超时 | 120s（读接口 10s） | 盖住 90s 就绪窗口 |

@@ -60,6 +60,7 @@ ENV COMPUTER_VERSION=${COMPUTER_VERSION} \
     COMPUTER_DATA_DIR=/data
 
 COPY --from=build /build/dist/host-agent.mjs /opt/host-agent/main.mjs
+COPY host-agent/settings.factory.json /usr/local/share/apemind-computer/settings.json
 
 VOLUME /data
 EXPOSE 8080 9090

@@ -262,7 +262,7 @@ test("crashed instance restarts automatically while desired is running", async (
 })
 
 test("capacity limit rejects new instances", async () => {
-  const env = await makeEnv({ COMPUTER_MAX_INSTANCES: "1" })
+  const env = await makeEnv({}, { max_instances: 1 })
   try {
     await env.sup.ensure("dave", "stopped")
     await assert.rejects(() => env.sup.ensure("erin", "stopped"), CapacityError)
@@ -293,7 +293,8 @@ test("state survives a supervisor restart via meta.json", async () => {
     await env.sup.shutdown()
 
     const { Supervisor } = await import("../src/supervisor.ts")
-    const sup2 = new Supervisor(env.cfg)
+    const { loadHostSettings } = await import("../src/settings.ts")
+    const sup2 = new Supervisor(env.cfg, loadHostSettings(env.cfg.dataDir))
     await sup2.init()
     const view = sup2.getView("grace")
     assert.ok(view)

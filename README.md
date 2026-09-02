@@ -59,12 +59,11 @@ node dist/host-agent.mjs
 | `COMPUTER_DATA_DIR` | `/data` | 租户工作区根目录（持久卷） |
 | `COMPUTER_GATEWAY_PORT` / `COMPUTER_CONTROL_PORT` | `8080` / `9090` | 监听端口 |
 | `COMPUTER_PORT_BASE` | `31000` | dsh 回环端口起点 |
-| `COMPUTER_MAX_INSTANCES` | `200` | 实例容量上限 |
-| `COMPUTER_IDLE_TIMEOUT_SEC` | `1800` | 闲置自动停进程（工作区保留，触达即唤醒） |
-| `COMPUTER_SESSION_TTL_SEC` | `7200` | 会话 cookie 有效期 |
 | `COMPUTER_DSH_COMMAND` | `dsh {patch} --profile web --no-open --port {port}` | 实例启动命令模板；`{patch}` 在存在托管配置时展开为 `--patch <文件>` |
 | `COMPUTER_UID_BASE` | `0`（关闭） | 每实例独立 uid 的起始值，开启需容器内 root |
 | `COMPUTER_LOOPBACK_ISOLATION` | 关闭 | 按 uid 装回环 iptables 规则，防租户串访，需 NET_ADMIN |
+
+闲置回收、会话 cookie 寿命、就绪窗口、停进程宽限和实例容量在 `/data/settings.json`（完整五键），出厂文件见镜像内 `/usr/local/share/apemind-computer/settings.json`。配对后用 `GET/PUT /v1/runtime` 的 `settings` 热更新。详见 [docs/host-settings.md](docs/host-settings.md)。
 
 ## 镜像
 

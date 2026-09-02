@@ -4,6 +4,7 @@ import * as path from "node:path"
 import { fileURLToPath } from "node:url"
 import { loadConfig, type Config } from "../src/config.ts"
 import { HostIdentity } from "../src/hoststate.ts"
+import { FACTORY_SETTINGS, loadHostSettings, type HostSettings, type HostSettingsStore } from "../src/settings.ts"
 import { Supervisor } from "../src/supervisor.ts"
 
 const FAKE_DSH = fileURLToPath(new URL("./fake-dsh.mjs", import.meta.url))
@@ -18,12 +19,26 @@ export interface TestEnv {
   cfg: Config
   identity: HostIdentity
   sup: Supervisor
+  settings: HostSettingsStore
   cleanup: () => Promise<void>
 }
 
-export async function makeEnv(overrides: Record<string, string> = {}): Promise<TestEnv> {
+export async function makeEnv(
+  overrides: Record<string, string> = {},
+  initialSettings: Partial<HostSettings> = {},
+): Promise<TestEnv> {
   const dataDir = await fsp.mkdtemp(path.join(os.tmpdir(), "computer-host-test-"))
   nextPortBase += 50
+  const settingsPayload: HostSettings = {
+    ...FACTORY_SETTINGS,
+    ready_timeout_sec: 15,
+    stop_grace_sec: 2,
+    max_instances: 10,
+    ...initialSettings,
+  }
+  await fsp.writeFile(path.join(dataDir, "settings.json"), `${JSON.stringify(settingsPayload, null, 2)}\n`, {
+    mode: 0o600,
+  })
   const cfg = loadConfig({
     COMPUTER_TICKET_SECRET: TEST_SECRET,
     COMPUTER_CONTROL_TOKEN: TEST_CONTROL_TOKEN,
@@ -32,17 +47,16 @@ export async function makeEnv(overrides: Record<string, string> = {}): Promise<T
     COMPUTER_DATA_DIR: dataDir,
     COMPUTER_DSH_COMMAND: `${process.execPath} ${FAKE_DSH} --port {port} {patch}`,
     COMPUTER_PORT_BASE: String(nextPortBase),
-    COMPUTER_READY_TIMEOUT_SEC: "15",
-    COMPUTER_STOP_GRACE_SEC: "2",
-    COMPUTER_MAX_INSTANCES: "10",
     ...overrides,
   })
-  const sup = new Supervisor(cfg)
+  const settings = loadHostSettings(dataDir)
+  const sup = new Supervisor(cfg, settings)
   await sup.init()
   return {
     cfg,
     identity: new HostIdentity(cfg),
     sup,
+    settings,
     cleanup: async () => {
       await sup.shutdown()
       await fsp.rm(dataDir, { recursive: true, force: true })
