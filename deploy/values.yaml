@@ -18,8 +18,8 @@ controlToken: ""
 # Optional strict-mode bootstrap code. When set, POST /v1/pair requires it.
 pairCode: ""
 
-maxInstances: 100
-idleTimeoutSec: 1800
+# Operational knobs (idle timeout, session TTL, capacity) live in
+# /data/settings.json. See docs/host-settings.md.
 # Per-instance uid isolation; 0 disables. Requires root in the container.
 uidBase: 0
 # Loopback iptables isolation between tenants. Requires NET_ADMIN and uidBase.

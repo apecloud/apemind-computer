@@ -114,7 +114,7 @@ test("invalid bodies and user ids are rejected", async () => {
 })
 
 test("capacity limit surfaces as 507", async () => {
-  const env = await makeEnv({ COMPUTER_MAX_INSTANCES: "1" })
+  const env = await makeEnv({}, { max_instances: 1 })
   const control = new Control(env.cfg, env.identity, env.sup)
   const port = await listen(control.server)
   const base = `http://127.0.0.1:${port}`

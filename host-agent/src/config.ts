@@ -12,11 +12,6 @@ export interface Config {
   gatewayPort: number
   controlPort: number
   portBase: number
-  maxInstances: number
-  idleTimeoutSec: number
-  sessionTtlSec: number
-  readyTimeoutSec: number
-  stopGraceSec: number
   /**
    * Command template used to start one dsh instance. {port} is replaced with the
    * assigned loopback port; {patch} expands to `--patch <file>` when a managed
@@ -63,11 +58,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     gatewayPort: intEnv(env, "COMPUTER_GATEWAY_PORT", 8080),
     controlPort: intEnv(env, "COMPUTER_CONTROL_PORT", 9090),
     portBase: intEnv(env, "COMPUTER_PORT_BASE", 31000),
-    maxInstances: intEnv(env, "COMPUTER_MAX_INSTANCES", 200),
-    idleTimeoutSec: intEnv(env, "COMPUTER_IDLE_TIMEOUT_SEC", 1800),
-    sessionTtlSec: intEnv(env, "COMPUTER_SESSION_TTL_SEC", 7200),
-    readyTimeoutSec: intEnv(env, "COMPUTER_READY_TIMEOUT_SEC", 90),
-    stopGraceSec: intEnv(env, "COMPUTER_STOP_GRACE_SEC", 10),
     dshCommand: (env.COMPUTER_DSH_COMMAND ?? "dsh {patch} --profile web --no-open --port {port}").split(/\s+/).filter(Boolean),
     uidBase: intEnv(env, "COMPUTER_UID_BASE", 0),
     loopbackIsolation: (env.COMPUTER_LOOPBACK_ISOLATION ?? "").trim() === "1",

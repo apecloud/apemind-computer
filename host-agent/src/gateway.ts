@@ -203,7 +203,7 @@ export class Gateway {
     const sessionToken = signToken(secret, {
       type: "session",
       userId: payload.userId,
-      exp: nowSec() + this.cfg.sessionTtlSec,
+      exp: nowSec() + this.sup.settings.snapshot().session_ttl_sec,
       generation: this.sup.sessionGeneration(payload.userId),
     })
     const attrs = [
@@ -211,7 +211,7 @@ export class Gateway {
       "HttpOnly",
       "SameSite=Lax",
       "Path=/",
-      `Max-Age=${this.cfg.sessionTtlSec}`,
+      `Max-Age=${this.sup.settings.snapshot().session_ttl_sec}`,
     ]
     if (this.cfg.publicOrigin.startsWith("https://")) attrs.push("Secure")
     res.writeHead(302, { location: "/", "set-cookie": attrs.join("; "), "cache-control": "no-store" })

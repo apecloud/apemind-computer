@@ -5,6 +5,7 @@ import * as fsp from "node:fs/promises"
 import * as net from "node:net"
 import * as path from "node:path"
 import type { Config } from "./config.ts"
+import type { HostSettingsStore } from "./settings.ts"
 import { log } from "./log.ts"
 import { USER_ID_RE } from "./ticket.ts"
 
@@ -193,13 +194,15 @@ function renderAgentsGuide(env: Record<string, string>): string | undefined {
 
 export class Supervisor {
   private readonly cfg: Config
+  readonly settings: HostSettingsStore
   private readonly instances = new Map<string, Instance>()
   private readonly reservedPorts = new Set<number>()
   private sweepTimer?: NodeJS.Timeout
   private shuttingDown = false
 
-  constructor(cfg: Config) {
+  constructor(cfg: Config, settings: HostSettingsStore) {
     this.cfg = cfg
+    this.settings = settings
   }
 
   private usersDir(): string {
@@ -251,7 +254,7 @@ export class Supervisor {
         log.warn("skip user dir without readable meta", { user: entry.name })
       }
     }
-    this.sweepTimer = setInterval(() => this.idleSweep(), 60_000)
+    this.sweepTimer = setInterval(() => this.sweepIdle(), 60_000)
     this.sweepTimer.unref()
     log.info("supervisor initialized", { instances: this.instances.size })
   }
@@ -305,7 +308,7 @@ export class Supervisor {
     if (!USER_ID_RE.test(userId)) throw new Error("invalid user_id")
     let inst = this.instances.get(userId)
     if (!inst) {
-      if (this.instances.size >= this.cfg.maxInstances) throw new CapacityError("max instances reached")
+      if (this.instances.size >= this.settings.snapshot().max_instances) throw new CapacityError("max instances reached")
       inst = await this.createInstance(userId)
     }
     if (env) await this.writeInstanceEnv(inst, env)
@@ -536,7 +539,7 @@ export class Supervisor {
       inst.error = `spawn failed: ${err.message}`
     })
 
-    const deadline = Date.now() + this.cfg.readyTimeoutSec * 1000
+    const deadline = Date.now() + this.settings.snapshot().ready_timeout_sec * 1000
     while (Date.now() < deadline) {
       // the exit handler can flip status to error while we await between probes
       if (inst.proc !== proc || proc.exitCode !== null || this.statusOf(inst) === "error") {
@@ -616,7 +619,7 @@ export class Supervisor {
     inst.stopping = true
     try {
       proc.kill("SIGTERM")
-      const exited = await Promise.race([once(proc, "exit").then(() => true), sleep(this.cfg.stopGraceSec * 1000).then(() => false)])
+      const exited = await Promise.race([once(proc, "exit").then(() => true), sleep(this.settings.snapshot().stop_grace_sec * 1000).then(() => false)])
       if (!exited) {
         proc.kill("SIGKILL")
         await once(proc, "exit")
@@ -628,8 +631,8 @@ export class Supervisor {
     log.info("instance stopped", { user: inst.userId })
   }
 
-  private idleSweep(): void {
-    const idleMs = this.cfg.idleTimeoutSec * 1000
+  sweepIdle(): void {
+    const idleMs = this.settings.snapshot().idle_timeout_sec * 1000
     if (idleMs <= 0) return
     const now = Date.now()
     for (const inst of this.instances.values()) {
@@ -646,7 +649,7 @@ export class Supervisor {
     for (const inst of this.instances.values()) {
       if (inst.port !== undefined && (inst.status === "running" || inst.status === "starting")) used.add(inst.port)
     }
-    for (let port = this.cfg.portBase; port < this.cfg.portBase + this.cfg.maxInstances * 4; port += 1) {
+    for (let port = this.cfg.portBase; port < this.cfg.portBase + this.settings.snapshot().max_instances * 4; port += 1) {
       if (used.has(port)) continue
       if (await portFree(port)) {
         this.reservedPorts.add(port)

@@ -3,11 +3,13 @@ import { Control } from "./control.ts"
 import { Gateway } from "./gateway.ts"
 import { HostIdentity } from "./hoststate.ts"
 import { log } from "./log.ts"
+import { loadHostSettings } from "./settings.ts"
 import { Supervisor } from "./supervisor.ts"
 
 async function main(): Promise<void> {
   const cfg = loadConfig()
-  const supervisor = new Supervisor(cfg)
+  const settings = loadHostSettings(cfg.dataDir)
+  const supervisor = new Supervisor(cfg, settings)
   await supervisor.init()
 
   const identity = new HostIdentity(cfg)

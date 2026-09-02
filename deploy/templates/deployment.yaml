@@ -51,10 +51,6 @@ spec:
                   name: {{ include "apemind-computer.fullname" . }}
                   key: pairCode
             {{- end }}
-            - name: COMPUTER_MAX_INSTANCES
-              value: {{ .Values.maxInstances | quote }}
-            - name: COMPUTER_IDLE_TIMEOUT_SEC
-              value: {{ .Values.idleTimeoutSec | quote }}
             {{- if .Values.uidBase }}
             - name: COMPUTER_UID_BASE
               value: {{ .Values.uidBase | quote }}

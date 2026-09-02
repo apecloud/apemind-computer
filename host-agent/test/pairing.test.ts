@@ -64,6 +64,7 @@ test("unpaired host: runtime is public, instances are locked", async () => {
     assert.ok(view.version)
     assert.equal(view.control_token, undefined)
     assert.equal(view.ticket_secret, undefined)
+    assert.equal(view.settings, undefined)
 
     assert.equal((await fetch(`${base}/v1/instances`)).status, 401)
     assert.equal((await fetch(`${base}/healthz`)).status, 401)

@@ -15,8 +15,8 @@ services:
       COMPUTER_PUBLIC_ORIGIN: http://127.0.0.1:18080
       # 配对前无会话时跳回的主站地址（配对后以配对写入的 main_url 为准）
       COMPUTER_MAIN_URL: http://127.0.0.1:3000
-      COMPUTER_MAX_INSTANCES: "50"
-      COMPUTER_IDLE_TIMEOUT_SEC: "1800"
+      # 运营旋钮（闲置回收、容量、会话 TTL）在 /data/settings.json，
+      # 见 docs/host-settings.md。不要再用 COMPUTER_IDLE_TIMEOUT_SEC 等环境变量。
       # 兼容模式：仍可用环境变量预共享两把密钥（两项必须同时设置），
       # 设置后本服务视为已配对，不再接受 /v1/pair。
       # COMPUTER_TICKET_SECRET: change-me-ticket-secret
