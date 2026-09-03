@@ -15,7 +15,8 @@
 - **MCP 工具**：官方 `dsh-mcp-client` 插件指向 ApeMind 的 MCP 端点，带 Bearer key。
   内置工具全部是知识读面：列集合/文档、读文档与分块、知识检索、图谱查询、网页读取等。
 - **模型网关**：`llm-pi-ai` 上投影一个 `apemind` provider，`baseURL` 指 ApeMind 的
-  OpenAI 兼容网关，模型列表是绑定用户当时可用的 chat 模型。
+  OpenAI 兼容网关，模型列表是绑定用户当时可用的 chat 模型；工作区默认 chat 模型
+  会覆盖 dsh 的 `agent-default-model` 路由。
 - **实例控制**：ApeMind 控制面负责 open/stop/状态与会话撤销，dsh 与宿主对此无感知。
 
 没打通的是其余全部：agent 无法建知识库、上传文档、管理 Bot 与对话、查组织成员、
@@ -207,6 +208,7 @@ dsh 官方 `dsh-agent-instructions` 插件会自动加载 `$DSH_HOME/AGENTS.md`
 | `APEMIND_API_KEY` | 已有 | 三通道共用凭证 |
 | `APEMIND_MCP_URL` | 已有 | MCP 端点 |
 | `APEMIND_LLM_BASE_URL` / `APEMIND_LLM_MODELS` | 已有 | 模型网关投影 |
+| `APEMIND_LLM_DEFAULT_MODEL` | 新增 | 工作区默认 chat 模型 id；宿主用来覆盖 dsh `agent-default-model` |
 | `APEMIND_BASE_URL` | 新增 | CLI / OpenAPI 主站地址 |
 | `APEMIND_ORG_ID` | 新增，仅组织实例 | CLI 默认组织上下文；引导文件渲染 |
 

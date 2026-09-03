@@ -17,6 +17,7 @@ if (process.env.HOME) {
       APEMIND_INSTANCE_ID: process.env.APEMIND_INSTANCE_ID ?? null,
       APEMIND_API_KEY: process.env.APEMIND_API_KEY ?? null,
       DSH_HOME: process.env.DSH_HOME ?? null,
+      DSH_PERMISSION_MODE: process.env.DSH_PERMISSION_MODE ?? null,
     },
   }
   fs.mkdirSync(path.join(process.env.HOME, ".apemind"), { recursive: true })
