@@ -21,6 +21,7 @@ test("ensure running starts dsh with the per-user environment", async () => {
     const probePath = path.join(env.cfg.dataDir, "users", "alice", ".apemind", "probe.json")
     const probe = JSON.parse(fs.readFileSync(probePath, "utf8"))
     assert.equal(probe.env.APEMIND_USER_ID, "alice")
+    assert.equal(probe.env.APEMIND_INSTANCE_ID, "alice")
     assert.ok(probe.env.DSH_HOME.endsWith("/.dsh"))
 
     const again = await env.sup.ensure("alice", "running")
@@ -107,6 +108,8 @@ test("full apemind env renders the workspace guide into DSH_HOME", async () => {
     assert.match(guide, /org12345678/)
     assert.match(guide, /apemind skills/)
     assert.match(guide, /MCP server "apemind"/)
+    assert.match(guide, /platform account role/)
+    assert.match(guide, /Do not run `org role list`/)
     assert.doesNotMatch(guide, /sk-test-guide/, "the key must stay out of the guide")
 
     const statePath = path.join(
@@ -122,10 +125,24 @@ test("full apemind env renders the workspace guide into DSH_HOME", async () => {
     const profile = JSON.parse(fs.readFileSync(statePath, "utf8")) as {
       base_url: string
       api_key: string
+      org_id?: string
+      workspace_kind?: string
     }
     assert.equal(profile.base_url, "https://main.test")
     assert.equal(profile.api_key, "sk-test-guide")
+    assert.equal(profile.org_id, "org12345678")
+    assert.equal(profile.workspace_kind, "organization")
     assert.equal(fs.statSync(statePath).mode & 0o777, 0o600)
+    const workspace = JSON.parse(
+      fs.readFileSync(path.join(env.cfg.dataDir, "users", "lena", ".apemind", "workspace.json"), "utf8"),
+    ) as { kind: string; org_id: string; instance_id: string }
+    assert.equal(workspace.kind, "organization")
+    assert.equal(workspace.org_id, "org12345678")
+    assert.equal(workspace.instance_id, "lena")
+    assert.doesNotMatch(
+      fs.readFileSync(path.join(env.cfg.dataDir, "users", "lena", ".apemind", "workspace.json"), "utf8"),
+      /sk-test-guide/,
+    )
     const cfg = JSON.parse(
       fs.readFileSync(
         path.join(env.cfg.dataDir, "users", "lena", ".config", "apemind", "config.json"),
@@ -182,7 +199,17 @@ test("guide without base url is absent and personal guide has no org line", asyn
     })
     const guide = fs.readFileSync(guidePath, "utf8")
     assert.doesNotMatch(guide, /Bound organization/)
+    assert.match(guide, /personal workspace/)
+    assert.match(guide, /Do not pass `--org-id`/)
     assert.doesNotMatch(guide, /MCP server/)
+    const personalProfile = JSON.parse(
+      fs.readFileSync(
+        path.join(env.cfg.dataDir, "users", "mike", ".config", "apemind", "profiles", "default", "state.json"),
+        "utf8",
+      ),
+    ) as { workspace_kind?: string; org_id?: string }
+    assert.equal(personalProfile.workspace_kind, "personal")
+    assert.equal(personalProfile.org_id, undefined)
   } finally {
     await env.cleanup()
   }

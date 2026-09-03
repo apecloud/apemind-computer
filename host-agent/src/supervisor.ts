@@ -175,6 +175,10 @@ function renderManagedPatch(env: Record<string, string>): string | undefined {
   return `${sections.join("\n")}\n`
 }
 
+function workspaceKind(env: Record<string, string>): "organization" | "personal" {
+  return env.APEMIND_ORG_ID ? "organization" : "personal"
+}
+
 /** Managed workspace guide, loaded by dsh from $DSH_HOME/AGENTS.md. Tells the
  * agent which identity this instance is bound to and which ApeMind channels
  * exist. Derived from env.json before every spawn (managed file: manual edits
@@ -184,12 +188,20 @@ function renderAgentsGuide(env: Record<string, string>): string | undefined {
   const lines = [
     "# ApeMind Hosted Workspace",
     "",
-    "This dsh instance is managed by ApeMind and bound to one ApeMind identity.",
+    "This dsh instance is managed by ApeMind and bound to one workspace.",
     `- ApeMind API base URL: ${env.APEMIND_BASE_URL}.`,
-    "- The `apemind` CLI is preinstalled and pre-authenticated (local profile under `$XDG_CONFIG_HOME/apemind`). Run `apemind skills` for full usage and `apemind whoami` for the bound identity. Do not print credentials.",
+    "- The `apemind` CLI is preinstalled and pre-authenticated (local profile under `$XDG_CONFIG_HOME/apemind`). Run `apemind whoami` and `apemind skills`. Do not print credentials.",
+    "- Workspace contract also lives in `$HOME/.apemind/workspace.json` (no secrets).",
   ]
   if (env.APEMIND_ORG_ID) {
-    lines.push(`- Bound organization: ${env.APEMIND_ORG_ID}. Org-scoped CLI commands (collection, document, bot, org) default to it.`)
+    lines.push(
+      `- Bound organization: ${env.APEMIND_ORG_ID}. You do not have a personal workspace on this instance.`,
+      "- Create collections and bots in the bound organization. Omit `--org-id`; the CLI profile already has it.",
+      "- `whoami.role` / `account_role=ro` is the platform account role, not organization permission. Use `whoami` or `org get` for `org_role` and `permissions`.",
+      "- Do not run `org role list` to decide whether you can write.",
+    )
+  } else {
+    lines.push("- This is a personal workspace. Operate only personal knowledge bases. Do not pass `--org-id`.")
   }
   if (env.APEMIND_MCP_URL) {
     lines.push('- The MCP server "apemind" provides knowledge search/read tools; prefer it for retrieval and use the CLI for everything else (creating collections, uploading documents, bots, chats).')
@@ -237,6 +249,10 @@ export class Supervisor {
 
   private guidePath(userId: string): string {
     return path.join(this.homeDir(userId), ".dsh", "AGENTS.md")
+  }
+
+  private workspacePath(userId: string): string {
+    return path.join(this.homeDir(userId), ".apemind", "workspace.json")
   }
 
   /** Per-instance CLI state root. Spawn sets XDG_CONFIG_HOME to $HOME/.config,
@@ -455,6 +471,7 @@ export class Supervisor {
       await fsp.rm(this.guidePath(inst.userId), { force: true })
     }
     await this.syncCliProfile(inst, env)
+    await this.syncWorkspaceFile(inst, env)
   }
 
   /** dsh's bash/tool children are spawned from scrubbedParentEnv(), which drops
@@ -473,12 +490,33 @@ export class Supervisor {
     await fsp.chmod(path.join(root, "profiles"), 0o700)
     await fsp.chmod(profileDir, 0o700)
     await writePrivateJson(path.join(root, "config.json"), { current_profile: "default" })
+    const kind = workspaceKind(env)
     await writePrivateJson(path.join(profileDir, "state.json"), {
       base_url: env.APEMIND_BASE_URL,
       api_key: env.APEMIND_API_KEY,
+      workspace_kind: kind,
+      ...(kind === "organization" ? { org_id: env.APEMIND_ORG_ID } : {}),
     })
     if (inst.meta.uid !== undefined) {
       await chownTree(root, inst.meta.uid, inst.meta.uid)
+    }
+  }
+
+  /** Non-secret workspace binding for CLI/doctor/agents. Key stays in the profile. */
+  private async syncWorkspaceFile(inst: Instance, env: Record<string, string>): Promise<void> {
+    const file = this.workspacePath(inst.userId)
+    if (!env.APEMIND_API_KEY) {
+      await fsp.rm(file, { force: true })
+      return
+    }
+    await writePrivateJson(file, {
+      kind: workspaceKind(env),
+      org_id: env.APEMIND_ORG_ID || "",
+      instance_id: inst.userId,
+      data_plane_username: env.APEMIND_DATA_PLANE_USERNAME || "",
+    })
+    if (inst.meta.uid !== undefined) {
+      await fsp.chown(file, inst.meta.uid, inst.meta.uid)
     }
   }
 
@@ -528,6 +566,7 @@ export class Supervisor {
       XDG_CACHE_HOME: path.join(home, ".cache"),
       XDG_DATA_HOME: path.join(home, ".local", "share"),
       APEMIND_USER_ID: inst.userId,
+      APEMIND_INSTANCE_ID: inst.userId,
       ...extraEnv,
     }
     const hasPatch = fs.existsSync(this.patchPath(inst.userId))
