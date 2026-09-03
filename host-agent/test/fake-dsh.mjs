@@ -14,6 +14,7 @@ if (process.env.HOME) {
     argv: args,
     env: {
       APEMIND_USER_ID: process.env.APEMIND_USER_ID ?? null,
+      APEMIND_INSTANCE_ID: process.env.APEMIND_INSTANCE_ID ?? null,
       APEMIND_API_KEY: process.env.APEMIND_API_KEY ?? null,
       DSH_HOME: process.env.DSH_HOME ?? null,
     },

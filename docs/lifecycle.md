@@ -135,8 +135,9 @@ dsh {patch} --profile web --no-open --port {port}
 | `USER` | 实例键 |
 | `DSH_HOME` | `$HOME/.dsh` |
 | `XDG_CONFIG_HOME` / `XDG_CACHE_HOME` / `XDG_DATA_HOME` | `$HOME/.config` / `.cache` / `.local/share` |
-| `APEMIND_USER_ID` | 实例键（对 host 不透明的租户字符串） |
-| `env.json` 里的全部键值 | 控制面注入。当前契约：`APEMIND_API_KEY`（绑定身份托管 key）、`APEMIND_BASE_URL`（MCP URL 去掉 `/mcp`，CLI 用）、`APEMIND_MCP_URL`、`APEMIND_LLM_BASE_URL`、`APEMIND_LLM_MODELS`；组织实例另有 `APEMIND_ORG_ID`。键名限 `^[A-Z][A-Z0-9_]{0,63}$` |
+| `APEMIND_USER_ID` | 实例键（对 host 不透明的租户字符串）。**不是** ApeMind 用户 id |
+| `APEMIND_INSTANCE_ID` | 与 `APEMIND_USER_ID` 相同的实例键；新代码读这个名字 |
+| `env.json` 里的全部键值 | 控制面注入。当前契约：`APEMIND_API_KEY`（绑定身份托管 key）、`APEMIND_BASE_URL`（API 源站，不依赖 MCP）、`APEMIND_MCP_URL`、`APEMIND_LLM_BASE_URL`、`APEMIND_LLM_MODELS`；组织实例另有 `APEMIND_ORG_ID`；可选 `APEMIND_DATA_PLANE_USERNAME`。键名限 `^[A-Z][A-Z0-9_]{0,63}$` |
 
 uid 隔离开启时以分配的 uid/gid 运行；stdout/stderr 进 `.apemind/dsh.log`。
 
@@ -148,7 +149,16 @@ uid 隔离开启时以分配的 uid/gid 运行；stdout/stderr 进 `.apemind/dsh
 
 两段都只携带环境变量名，密钥不落在 yaml 里，文件泄露不等于密钥泄露（`env.json` 仍含密钥本体，0600 + uid 隔离保护）。patch 对 dsh 的实际生效行为按锁定的 dsh 版本在 staging 验收（与 MCP 行同一口径）。
 
-`$DSH_HOME/AGENTS.md`（工作区引导，官方 `dsh-agent-instructions` 自动加载）同样按 env 条件渲染：`APEMIND_API_KEY` + `APEMIND_BASE_URL` 齐全时生成，包含绑定身份入口（`apemind whoami` / `apemind skills`）、`APEMIND_ORG_ID` 存在时的默认组织行、MCP 与模型行。它是托管文件——每次拉起 dsh 前按 `env.json` 重写，手工编辑不保留；只出现 env 变量名与 id，不出现密钥。镜像内置 `apemind` CLI（`/usr/local/bin/apemind`，构建时锁版本 + sha256 校验），实例进程经继承的 `PATH` 直接可用，配合注入的 `APEMIND_BASE_URL`/`APEMIND_API_KEY`/`APEMIND_ORG_ID` 免登录工作。
+磁盘上有四份托管文件，权威如下：
+
+| 文件 | 权威 | 含密钥 |
+| --- | --- | --- |
+| `.apemind/env.json` | 控制面注入的进程环境；spawn 白名单读它 | 是（`APEMIND_API_KEY`） |
+| `$XDG_CONFIG_HOME/apemind/profiles/default/state.json` | CLI 在 env 被 scrub 后的默认凭据与 `org_id` / `workspace_kind` | 是 |
+| `.apemind/workspace.json` | 工作区类型、组织 id、实例键、数据面用户名；给 agent / `doctor` 读 | 否 |
+| `$DSH_HOME/AGENTS.md` | 给模型看的工作区说明；组织版与个人版文案不同 | 否 |
+
+`$DSH_HOME/AGENTS.md` 在 `APEMIND_API_KEY` + `APEMIND_BASE_URL` 齐全时生成。组织版写明没有个人空间、`whoami` 里的 `ro` 是平台账号角色、不要用 `org role list` 判断写权限；个人版写明不要传 `--org-id`。它是托管文件——每次拉起 dsh 前按 `env.json` 重写，手工编辑不保留；只出现 env 变量名与 id，不出现密钥。镜像内置 `apemind` CLI（`/usr/local/bin/apemind`，构建时锁版本 + sha256 校验），实例进程经继承的 `PATH` 直接可用。`APEMIND_ORG_ID` 同时写入 CLI profile 和 `workspace.json`，不依赖 bash 子进程继承。
 
 ### 3.3 再次打开 / 换人打开（实例已存在）
 

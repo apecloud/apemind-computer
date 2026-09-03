@@ -105,12 +105,15 @@ harness 密钥不漏进 bash）。因此：
 - **执行（读 profile）**：agent 跑 `apemind` 时环境里没有 key，CLI 读
   该实例 HOME 下的 profile 完成 Bearer 认证。
 
-注入的前提：部署配置了 MCP 端点（`APEMIND_BASE_URL` 由 MCP URL 推导）。
-未配 MCP 的部署不注入 CLI 上下文，也不写 profile。
+`APEMIND_BASE_URL` 与 MCP 解耦：控制面在有托管 key 时写入 API 源站（优先从
+MCP URL 去掉 `/mcp`，否则从 LLM 网关去掉 `/v1/llm`，再退回站点公钥 URL）。
+未配 MCP、只配了模型时，CLI profile 和 `AGENTS.md` 仍然生成。
 
-CLI profile 的字段只使用 CLI 已经公开的 `base_url` / `api_key`；目录权限
-0700、文件 0600，与 CLI 自己 `Save` 写出的形态一致。key 轮换 = 下一次
-ensure 覆盖 `env.json` 和 profile。不在 host-agent 里调用 `apemind login`
+CLI profile 写入 `base_url` / `api_key` / `workspace_kind`，组织实例另有
+`org_id`。另有一份不含密钥的 `$HOME/.apemind/workspace.json`
+（`kind` / `org_id` / `instance_id` / `data_plane_username`）。目录权限
+0700、文件 0600。key 轮换 = 下一次 ensure 覆盖 `env.json`、profile 与
+`workspace.json`。不在 host-agent 里调用 `apemind login`
 （那会走会话 cookie，不是托管 key）。
 
 ### 逐实例隔离：每个 dsh 一份独立凭证
@@ -136,9 +139,9 @@ dsh 进程继承宿主 `PATH`，agent 直接跑 `apemind`。升级 = 换镜像 t
 
 ### 上下文缺省（CLI 小改）
 
-组织实例里 agent 的每条命令都该默认作用于绑定组织。CLI 增加：`--org-id` 未显式
-提供时读 `APEMIND_ORG_ID` 环境变量。个人实例不注入该变量，行为不变。这是唯一
-影响命令语义的 CLI 改动。
+组织实例里 agent 的每条命令都该默认作用于绑定组织。默认顺序：显式 `--org-id` >
+`APEMIND_ORG_ID` > CLI profile 的 `org_id`。个人实例写入 `workspace_kind=personal`，
+CLI 拒绝 `--org-id`。组织实例拒绝打到别的组织。
 
 其余 CLI 改动按需推进，不预铺：`doctor` 识别托管环境（检测到注入 env 时报告
 绑定身份与通道健康）；`skills` 文本补充托管 dsh 场景说明；OpenAPI 长尾命令

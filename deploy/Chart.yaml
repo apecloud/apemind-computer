@@ -2,5 +2,5 @@ apiVersion: v2
 name: apemind-computer
 description: Multi-tenant hosted dsh (computer-host) gateway, control API, and supervisor.
 type: application
-version: 0.2.8
-appVersion: "v0.2.8"
+version: 0.2.11
+appVersion: "v0.2.11"
