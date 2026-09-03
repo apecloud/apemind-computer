@@ -22,6 +22,7 @@ test("ensure running starts dsh with the per-user environment", async () => {
     const probe = JSON.parse(fs.readFileSync(probePath, "utf8"))
     assert.equal(probe.env.APEMIND_USER_ID, "alice")
     assert.equal(probe.env.APEMIND_INSTANCE_ID, "alice")
+    assert.equal(probe.env.DSH_PERMISSION_MODE, "danger-full-access")
     assert.ok(probe.env.DSH_HOME.endsWith("/.dsh"))
 
     const again = await env.sup.ensure("alice", "running")
@@ -82,7 +83,56 @@ test("env with llm projection renders the apemind provider row", async () => {
     assert.match(patch, /name: 'O''Neil'/, "single quotes must be yaml-escaped")
     assert.match(patch, /displayName: 'ApeMind'/)
     assert.doesNotMatch(patch, /displayName: 'GPT X'/)
+    assert.doesNotMatch(patch, /id: agent-default-model/)
     assert.doesNotMatch(patch, /sk-test-456/, "the key must stay out of the patch file")
+  } finally {
+    await env.cleanup()
+  }
+})
+
+test("default model id overrides agent-default-model when it is in the projection", async () => {
+  const env = await makeEnv()
+  try {
+    await env.sup.ensure("opal", "stopped", {
+      APEMIND_API_KEY: "sk-test-default",
+      APEMIND_LLM_BASE_URL: "https://main.test/v1/llm",
+      APEMIND_LLM_MODELS: JSON.stringify([
+        { id: "model0123", name: "GPT X" },
+        { id: "model0456", name: "Default Chat" },
+      ]),
+      APEMIND_LLM_DEFAULT_MODEL: "model0456",
+    })
+    const patch = fs.readFileSync(
+      path.join(env.cfg.dataDir, "users", "opal", ".apemind", "managed.cordis.yml"),
+      "utf8",
+    )
+    assert.match(patch, /- id: agent-default-model/)
+    assert.match(patch, /provider: apemind/)
+    assert.match(patch, /model: 'model0456'/)
+    assert.equal(
+      fs.existsSync(path.join(env.cfg.dataDir, "users", "opal", ".dsh", "settings.yaml")),
+      false,
+      "host must not write the user settings document",
+    )
+  } finally {
+    await env.cleanup()
+  }
+})
+
+test("unknown default model id does not override agent-default-model", async () => {
+  const env = await makeEnv()
+  try {
+    await env.sup.ensure("pearl", "stopped", {
+      APEMIND_API_KEY: "sk-test-missing",
+      APEMIND_LLM_BASE_URL: "https://main.test/v1/llm",
+      APEMIND_LLM_MODELS: JSON.stringify([{ id: "model0123", name: "GPT X" }]),
+      APEMIND_LLM_DEFAULT_MODEL: "model-missing",
+    })
+    const patch = fs.readFileSync(
+      path.join(env.cfg.dataDir, "users", "pearl", ".apemind", "managed.cordis.yml"),
+      "utf8",
+    )
+    assert.doesNotMatch(patch, /id: agent-default-model/)
   } finally {
     await env.cleanup()
   }

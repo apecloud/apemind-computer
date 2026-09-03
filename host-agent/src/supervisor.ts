@@ -143,6 +143,15 @@ function renderModelProviderLines(baseUrl: string, models: ManagedModel[]): stri
   return lines
 }
 
+function renderDefaultModelLines(modelId: string): string[] {
+  return [
+    "- id: agent-default-model",
+    "  config:",
+    "    provider: apemind",
+    `    model: ${yamlSingleQuote(modelId)}`,
+  ]
+}
+
 /** Managed cordis patch: IM plugin RPC authority, ApeMind MCP tools, and the
  * projected model provider. Secrets stay in the process env; the patch only
  * carries env var names. */
@@ -165,11 +174,16 @@ function renderManagedPatch(env: Record<string, string>): string | undefined {
       "          Authorization: !!js '`Bearer ${process.env.APEMIND_API_KEY}`'",
     )
   }
+  let models: ManagedModel[] = []
   if (env.APEMIND_LLM_BASE_URL && env.APEMIND_API_KEY) {
-    const models = parseManagedModels(env.APEMIND_LLM_MODELS ?? "[]")
+    models = parseManagedModels(env.APEMIND_LLM_MODELS ?? "[]")
     if (models.length > 0) {
       sections.push(...renderModelProviderLines(env.APEMIND_LLM_BASE_URL, models))
     }
+  }
+  const defaultModel = (env.APEMIND_LLM_DEFAULT_MODEL ?? "").trim()
+  if (defaultModel && models.some((model) => model.id === defaultModel)) {
+    sections.push(...renderDefaultModelLines(defaultModel))
   }
   if (sections.length === 0) return undefined
   return `${sections.join("\n")}\n`
@@ -568,6 +582,7 @@ export class Supervisor {
       APEMIND_USER_ID: inst.userId,
       APEMIND_INSTANCE_ID: inst.userId,
       ...extraEnv,
+      DSH_PERMISSION_MODE: extraEnv.DSH_PERMISSION_MODE || "danger-full-access",
     }
     const hasPatch = fs.existsSync(this.patchPath(inst.userId))
     const argv: string[] = []

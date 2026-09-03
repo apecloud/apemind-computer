@@ -137,17 +137,19 @@ dsh {patch} --profile web --no-open --port {port}
 | `XDG_CONFIG_HOME` / `XDG_CACHE_HOME` / `XDG_DATA_HOME` | `$HOME/.config` / `.cache` / `.local/share` |
 | `APEMIND_USER_ID` | 实例键（对 host 不透明的租户字符串）。**不是** ApeMind 用户 id |
 | `APEMIND_INSTANCE_ID` | 与 `APEMIND_USER_ID` 相同的实例键；新代码读这个名字 |
-| `env.json` 里的全部键值 | 控制面注入。当前契约：`APEMIND_API_KEY`（绑定身份托管 key）、`APEMIND_BASE_URL`（API 源站，不依赖 MCP）、`APEMIND_MCP_URL`、`APEMIND_LLM_BASE_URL`、`APEMIND_LLM_MODELS`；组织实例另有 `APEMIND_ORG_ID`；可选 `APEMIND_DATA_PLANE_USERNAME`。键名限 `^[A-Z][A-Z0-9_]{0,63}$` |
+| `DSH_PERMISSION_MODE` | 托管实例拉起时写入 `danger-full-access`。这是 dsh 官方的进程级部署覆盖，新会话默认 Full access；用户之后在 Settings 改 `permission.defaultPreset` 仍作用于以后的会话。已有会话的权限钉死不变。控制面若在 `env.json` 显式给出该键，以其为准。 |
+| `env.json` 里的全部键值 | 控制面注入。当前契约：`APEMIND_API_KEY`（绑定身份托管 key）、`APEMIND_BASE_URL`（API 源站，不依赖 MCP）、`APEMIND_MCP_URL`、`APEMIND_LLM_BASE_URL`、`APEMIND_LLM_MODELS`、可选 `APEMIND_LLM_DEFAULT_MODEL`（工作区默认 chat 模型 id，且必须出现在 `APEMIND_LLM_MODELS` 里）；组织实例另有 `APEMIND_ORG_ID`；可选 `APEMIND_DATA_PLANE_USERNAME`。键名限 `^[A-Z][A-Z0-9_]{0,63}$` |
 
 uid 隔离开启时以分配的 uid/gid 运行；stdout/stderr 进 `.apemind/dsh.log`。
 
-`managed.cordis.yml` 有三段内容。IM 段始终写出；其余两段按 env 是否齐全条件渲染：
+`managed.cordis.yml` 有四段内容。IM 段始终写出；其余按 env 是否齐全条件渲染：
 
 - **IM 机器人 RPC**（始终）：给 `xmanrui-dsh-im` 写 `rpcAuthority: trusted-host`。网关把浏览器 Host 指到回环，面板域名要能管机器人。插件本体在镜像 seed，host-agent 拉起前写入 `$DSH_HOME/profiles/web`。
 - **MCP 工具**（`APEMIND_MCP_URL` + `APEMIND_API_KEY`）：插入官方 `@deepseek-ai/dsh-mcp-client` 插件行，streamable-http 指向 MCP 地址，Authorization 头用 `!!js` 从**进程环境**读 `APEMIND_API_KEY`。
 - **模型提供方投影**（`APEMIND_LLM_BASE_URL` + `APEMIND_API_KEY` + 非空 `APEMIND_LLM_MODELS`）：在 `llm-pi-ai` 行的 config 上合并一个名为 `apemind` 的 provider（`api: openai-completions`、`baseURL` 指 ApeMind 的 OpenAI 兼容网关、`apiKeyEnv: APEMIND_API_KEY`），模型列表来自 `APEMIND_LLM_MODELS`——一个 JSON 数组，元素 `{id, name?, context_window?, vision?}`。`id` 是 ApeMind 模型 id（dsh 发起补全时原样回传，网关按它解析上游）；`name` 写成 dsh `PiAiModelProfile.name`（选择器文案），不是 provider 级的 `displayName`。JSON 非法或元素缺 `id` 时 ensure 直接失败（控制面 400），不写任何文件。每次拉起 dsh 都会按当时的 `env.json` 重写 patch，避免宿主升级后仍读到旧 yaml。
+- **默认模型路由**（`APEMIND_LLM_DEFAULT_MODEL` 且该 id 已在投影列表里）：覆盖组合层 `agent-default-model` 为 `{provider: apemind, model: <id>}`，替换出厂的 `deepseek-official` / `deepseek-v4-flash`。用户之后在 dsh 里另选模型仍写 `$DSH_HOME/settings.yaml`，覆盖组合默认值。宿主不写 settings.yaml。
 
-两段都只携带环境变量名，密钥不落在 yaml 里，文件泄露不等于密钥泄露（`env.json` 仍含密钥本体，0600 + uid 隔离保护）。patch 对 dsh 的实际生效行为按锁定的 dsh 版本在 staging 验收（与 MCP 行同一口径）。
+这些段落都只携带环境变量名，密钥不落在 yaml 里，文件泄露不等于密钥泄露（`env.json` 仍含密钥本体，0600 + uid 隔离保护）。patch 对 dsh 的实际生效行为按锁定的 dsh 版本在 staging 验收（与 MCP 行同一口径）。
 
 磁盘上有四份托管文件，权威如下：
 
