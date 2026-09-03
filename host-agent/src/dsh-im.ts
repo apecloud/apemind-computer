@@ -1,8 +1,9 @@
 import * as fsp from "node:fs/promises"
 import * as path from "node:path"
 
-/** Official npm package installed into every hosted web profile. */
+/** Official npm packages installed into every hosted web profile. */
 export const DSH_IM_PACKAGE = "@xmanrui/dsh-im"
+export const DSH_AUTOMATION_PACKAGE = "@michengai/dsh-automation"
 
 const WEB_REL = path.join("profiles", "web")
 
@@ -33,21 +34,30 @@ export function tenantWebDir(dshHome: string): string {
   return path.join(dshHome, WEB_REL)
 }
 
-/** Add the pinned IM plugin without replacing other deps or a user-chosen version. */
-export function mergeDshImBundle(
+/** Add every extra plugin from the seed profile. Existing pins stay. */
+export function mergeSeedPlugins(
   pkg: WebProfilePackage,
-  version: string,
+  seedPkg: WebProfilePackage,
 ): { next: WebProfilePackage; changed: boolean } {
   const dependencies = { ...(pkg.dependencies ?? {}) }
   const bundles = [...(pkg.dsh?.profile?.bundles ?? EMPTY_WEB_PROFILE.dsh!.profile!.bundles!)]
   let changed = false
-  if (dependencies[DSH_IM_PACKAGE] === undefined) {
-    dependencies[DSH_IM_PACKAGE] = version
-    changed = true
+  for (const [name, version] of Object.entries(seedPkg.dependencies ?? {})) {
+    if (typeof version !== "string" || version.trim() === "") continue
+    if (dependencies[name] === undefined) {
+      dependencies[name] = version
+      changed = true
+    }
+    if (!bundles.includes(name)) {
+      bundles.push(name)
+      changed = true
+    }
   }
-  if (!bundles.includes(DSH_IM_PACKAGE)) {
-    bundles.push(DSH_IM_PACKAGE)
-    changed = true
+  for (const name of seedPkg.dsh?.profile?.bundles ?? []) {
+    if (!bundles.includes(name)) {
+      bundles.push(name)
+      changed = true
+    }
   }
   const next: WebProfilePackage = {
     ...pkg,
@@ -61,6 +71,22 @@ export function mergeDshImBundle(
     },
   }
   return { next, changed }
+}
+
+/** Add the pinned IM plugin without replacing other deps or a user-chosen version. */
+export function mergeDshImBundle(
+  pkg: WebProfilePackage,
+  version: string,
+): { next: WebProfilePackage; changed: boolean } {
+  return mergeSeedPlugins(pkg, { dependencies: { [DSH_IM_PACKAGE]: version } })
+}
+
+export function seedExtraPins(seedPkg: WebProfilePackage): Array<{ name: string; version: string }> {
+  const pins: Array<{ name: string; version: string }> = []
+  for (const [name, version] of Object.entries(seedPkg.dependencies ?? {})) {
+    if (typeof version === "string" && version.trim() !== "") pins.push({ name, version })
+  }
+  return pins
 }
 
 export function mergeWorkspaceExclude(text: string, spec: string): string {
@@ -126,7 +152,7 @@ export interface EnsureDshImResult {
 }
 
 /**
- * Make sure a tenant web profile lists and can load the baked IM plugin.
+ * Make sure a tenant web profile lists and can load every baked default plugin.
  * Missing seed (dev / unit tests) is a no-op. Existing extra plugins stay.
  */
 export async function ensureDefaultDshIm(dshHome: string, seedDshHome: string): Promise<EnsureDshImResult> {
@@ -140,9 +166,9 @@ export async function ensureDefaultDshIm(dshHome: string, seedDshHome: string): 
   } catch {
     return { applied: false, reason: "seed package unreadable" }
   }
-  const version = seedPkg.dependencies?.[DSH_IM_PACKAGE]
-  if (typeof version !== "string" || version.trim() === "") {
-    return { applied: false, reason: "seed has no dsh-im pin" }
+  const pins = seedExtraPins(seedPkg)
+  if (pins.length === 0) {
+    return { applied: false, reason: "seed has no extra plugins" }
   }
 
   const web = tenantWebDir(dshHome)
@@ -156,7 +182,7 @@ export async function ensureDefaultDshIm(dshHome: string, seedDshHome: string): 
       pkg = EMPTY_WEB_PROFILE
     }
   }
-  const merged = mergeDshImBundle(pkg, version)
+  const merged = mergeSeedPlugins(pkg, seedPkg)
   let changed = merged.changed || !(await pathExists(pkgPath))
   if (changed) {
     await fsp.writeFile(pkgPath, `${JSON.stringify(merged.next, null, 2)}\n`, { mode: 0o644 })
@@ -165,17 +191,15 @@ export async function ensureDefaultDshIm(dshHome: string, seedDshHome: string): 
   const seedWs = path.join(seedWebDir(seed), "pnpm-workspace.yaml")
   const tenantWs = path.join(web, "pnpm-workspace.yaml")
   if (await pathExists(seedWs)) {
-    const spec = `${DSH_IM_PACKAGE}@${version}`
-    if (await pathExists(tenantWs)) {
-      const current = await fsp.readFile(tenantWs, "utf8")
-      const next = mergeWorkspaceExclude(current, spec)
-      if (next !== current) {
-        await fsp.writeFile(tenantWs, next.endsWith("\n") ? next : `${next}\n`, { mode: 0o644 })
-        changed = true
-      }
-    } else {
-      const seedText = await fsp.readFile(seedWs, "utf8")
-      await fsp.writeFile(tenantWs, mergeWorkspaceExclude(seedText, spec), { mode: 0o644 })
+    let workspace = (await pathExists(tenantWs))
+      ? await fsp.readFile(tenantWs, "utf8")
+      : await fsp.readFile(seedWs, "utf8")
+    const before = workspace
+    for (const pin of pins) {
+      workspace = mergeWorkspaceExclude(workspace, `${pin.name}@${pin.version}`)
+    }
+    if (workspace !== before || !(await pathExists(tenantWs))) {
+      await fsp.writeFile(tenantWs, workspace.endsWith("\n") ? workspace : `${workspace}\n`, { mode: 0o644 })
       changed = true
     }
   }

@@ -41,17 +41,25 @@ RUN npm install -g @deepseek-ai/dsh@${DSH_VERSION} && npm cache clean --force
 ARG PNPM_VERSION=11.25.0
 RUN corepack enable && corepack prepare pnpm@${PNPM_VERSION} --activate && pnpm --version
 
-# Official IM plugin, pinned. host-agent copies this seed into each tenant
+# Official web plugins, pinned. host-agent copies this seed into each tenant
 # $DSH_HOME so instances do not download from npm at start.
 ARG DSH_IM_VERSION=4.8.0
+ARG DSH_AUTOMATION_VERSION=0.1.25
 RUN mkdir -p /opt/dsh-seed \
     && HOME=/opt/dsh-seed DSH_HOME=/opt/dsh-seed/.dsh \
        dsh --profile web --dump-default-config >/dev/null \
     && HOME=/opt/dsh-seed DSH_HOME=/opt/dsh-seed/.dsh \
        PNPM_STORE_DIR=/tmp/pnpm-store \
-       dsh plugin --profile web add -w --save-exact @xmanrui/dsh-im@${DSH_IM_VERSION} \
+       dsh plugin --profile web add -w --save-exact --registry=https://registry.npmjs.org/ \
+         @xmanrui/dsh-im@${DSH_IM_VERSION} \
+    && HOME=/opt/dsh-seed DSH_HOME=/opt/dsh-seed/.dsh \
+       PNPM_STORE_DIR=/tmp/pnpm-store \
+       dsh plugin --profile web add -w --save-exact --registry=https://registry.npmjs.org/ \
+         @michengai/dsh-automation@${DSH_AUTOMATION_VERSION} \
     && test -f /opt/dsh-seed/.dsh/profiles/web/node_modules/@xmanrui/dsh-im/package.json \
+    && test -f /opt/dsh-seed/.dsh/profiles/web/node_modules/@michengai/dsh-automation/package.json \
     && grep -q "@xmanrui/dsh-im" /opt/dsh-seed/.dsh/profiles/web/package.json \
+    && grep -q "@michengai/dsh-automation" /opt/dsh-seed/.dsh/profiles/web/package.json \
     && rm -rf /tmp/pnpm-store /opt/dsh-seed/.local /opt/dsh-seed/Library \
     && chmod -R a+rX /opt/dsh-seed/.dsh
 
