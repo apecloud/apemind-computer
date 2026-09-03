@@ -5,10 +5,12 @@ import * as os from "node:os"
 import * as path from "node:path"
 import { test } from "node:test"
 import {
+  DSH_AUTOMATION_PACKAGE,
   DSH_IM_PACKAGE,
   EMPTY_WEB_PROFILE,
   ensureDefaultDshIm,
   mergeDshImBundle,
+  mergeSeedPlugins,
   mergeWorkspaceExclude,
 } from "../src/dsh-im.ts"
 
@@ -30,6 +32,25 @@ test("merge adds the pin and bundle without dropping other plugins", () => {
     "dsh-auth-everying",
     DSH_IM_PACKAGE,
   ])
+})
+
+test("mergeSeedPlugins adds every seed extra without dropping others", () => {
+  const { next, changed } = mergeSeedPlugins(
+    {
+      ...EMPTY_WEB_PROFILE,
+      dependencies: { leftover: "1.0.0" },
+      dsh: { profile: { bundles: ["@deepseek-ai/dsh-base", "@deepseek-ai/dsh-web-app"] } },
+    },
+    {
+      dependencies: { [DSH_IM_PACKAGE]: "4.8.0", [DSH_AUTOMATION_PACKAGE]: "0.1.25" },
+    },
+  )
+  assert.equal(changed, true)
+  assert.equal(next.dependencies?.[DSH_IM_PACKAGE], "4.8.0")
+  assert.equal(next.dependencies?.[DSH_AUTOMATION_PACKAGE], "0.1.25")
+  assert.equal(next.dependencies?.leftover, "1.0.0")
+  assert.ok(next.dsh?.profile?.bundles?.includes(DSH_IM_PACKAGE))
+  assert.ok(next.dsh?.profile?.bundles?.includes(DSH_AUTOMATION_PACKAGE))
 })
 
 test("merge keeps a user-chosen dsh-im version", () => {
@@ -69,12 +90,17 @@ test("ensure writes the profile and copies only missing packages", async () => {
     const seedWeb = path.join(dir, "seed", "profiles", "web")
     const seedNm = path.join(seedWeb, "node_modules")
     await fsp.mkdir(path.join(seedNm, "@xmanrui", "dsh-im"), { recursive: true })
+    await fsp.mkdir(path.join(seedNm, "@michengai", "dsh-automation"), { recursive: true })
     await fsp.mkdir(path.join(seedNm, "undici"), { recursive: true })
     await fsp.writeFile(path.join(seedNm, "@xmanrui", "dsh-im", "index.js"), "export default 1\n")
+    await fsp.writeFile(path.join(seedNm, "@michengai", "dsh-automation", "index.js"), "export default 3\n")
     await fsp.writeFile(path.join(seedNm, "undici", "index.js"), "export default 2\n")
     await fsp.writeFile(
       path.join(seedWeb, "package.json"),
-      `${JSON.stringify({ name: "dsh-profile-web", dependencies: { [DSH_IM_PACKAGE]: "4.8.0" } }, null, 2)}\n`,
+      `${JSON.stringify({
+        name: "dsh-profile-web",
+        dependencies: { [DSH_IM_PACKAGE]: "4.8.0", [DSH_AUTOMATION_PACKAGE]: "0.1.25" },
+      }, null, 2)}\n`,
     )
     await fsp.writeFile(
       path.join(seedWeb, "pnpm-workspace.yaml"),
@@ -98,11 +124,19 @@ test("ensure writes the profile and copies only missing packages", async () => {
     assert.equal(result.applied, true)
     const pkg = JSON.parse(fs.readFileSync(path.join(tenant, "profiles", "web", "package.json"), "utf8"))
     assert.equal(pkg.dependencies[DSH_IM_PACKAGE], "4.8.0")
+    assert.equal(pkg.dependencies[DSH_AUTOMATION_PACKAGE], "0.1.25")
     assert.equal(pkg.dependencies.leftover, "1.0.0")
     assert.ok(pkg.dsh.profile.bundles.includes(DSH_IM_PACKAGE))
+    assert.ok(pkg.dsh.profile.bundles.includes(DSH_AUTOMATION_PACKAGE))
     assert.equal(fs.readFileSync(path.join(tenantNm, "undici", "index.js"), "utf8"), "keep-me\n")
     assert.equal(fs.readFileSync(path.join(tenantNm, "@xmanrui", "dsh-im", "index.js"), "utf8"), "export default 1\n")
-    assert.match(fs.readFileSync(path.join(tenant, "profiles", "web", "pnpm-workspace.yaml"), "utf8"), /dsh-im@4\.8\.0/)
+    assert.equal(
+      fs.readFileSync(path.join(tenantNm, "@michengai", "dsh-automation", "index.js"), "utf8"),
+      "export default 3\n",
+    )
+    const workspace = fs.readFileSync(path.join(tenant, "profiles", "web", "pnpm-workspace.yaml"), "utf8")
+    assert.match(workspace, /dsh-im@4\.8\.0/)
+    assert.match(workspace, /dsh-automation@0\.1\.25/)
   } finally {
     await fsp.rm(dir, { recursive: true, force: true })
   }

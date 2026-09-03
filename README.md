@@ -89,10 +89,11 @@ python3 scripts/density.py --cleanup-only --url http://127.0.0.1:9090
 
 镜像只在 GitHub Actions 构建（推 tag `v*.*.*` 触发），不在本地构建。dsh 版本在
 Dockerfile 的 `DSH_VERSION` 中锁定；`pnpm` 由 `corepack` 按 `PNPM_VERSION` 钉死并
-放到 PATH（`dsh plugin` 需要它）；官方 IM 插件 `@xmanrui/dsh-im` 按 `DSH_IM_VERSION`
+放到 PATH（`dsh plugin` 需要它）；官方 IM 插件 `@xmanrui/dsh-im` 和定时任务插件
+`@michengai/dsh-automation` 按 `DSH_IM_VERSION` / `DSH_AUTOMATION_VERSION`
 预装进 `/opt/dsh-seed/.dsh`，host-agent 拉起实例时写入租户 web profile；
 `apemind` CLI 同样构建时锁版本 + sha256，装到 `/usr/local/bin/apemind`
-（运行期零下载）。升级 dsh、pnpm、dsh-im 或 CLI 一律走新镜像 tag 加回归验证。
+（运行期零下载）。升级 dsh、pnpm、默认插件或 CLI 一律走新镜像 tag 加回归验证。
 租户 HOME 与 CLI 身份注入见 [docs/lifecycle.md](docs/lifecycle.md) §1。
 
 当前发布 tag 是 `v0.2.8`。离线机先在联网环境导出镜像再 `docker load`：

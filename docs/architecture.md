@@ -93,6 +93,7 @@ flowchart TB
 - 身份/访问控制 → 网关在 dsh 进程外完成，dsh 零登录。
 - 知识库/ApeMind 能力 → 官方 `@deepseek-ai/dsh-mcp-client` 插件（streamable-http + Bearer header），纯配置。
 - IM 机器人 → 上游 npm 包 `@xmanrui/dsh-im`，镜像按 `DSH_IM_VERSION` 预装，host-agent 写入每个租户的 web profile；不写自研 plugin。
+- 定时任务 → 上游 npm 包 `@michengai/dsh-automation`，镜像按 `DSH_AUTOMATION_VERSION` 预装，同一条 seed 写入路径。
 - 模型接入 → ApeMind 把工作区可用的 chat 模型投影成托管 provider 块（`llm-pi-ai.providers.apemind`，`baseURL` 指 ApeMind 的 OpenAI 兼容网关，Bearer 用托管 key；env 契约与渲染细节见 [lifecycle.md](lifecycle.md) §3.2）；BYOK 用户仍可自填官方 provider 配置。
 - 托管配置注入 → `dsh web --patch`：官方 patch overlay，managed 配置与用户自己的配置文件互不覆盖。
 
@@ -167,7 +168,7 @@ sequenceDiagram
 
 AIO 底座（Xvfb/Chromium/VNC/noVNC/supervisord/nginx/gem-server/tinyproxy/bubblewrap）整体弃用。托管 dsh WebUI 用不到桌面沙箱，却带来体积、架构限制和多余攻击面。若未来要浏览器自动化/桌面，另起独立镜像轨道。
 
-全新镜像（node:22-bookworm-slim，amd64+arm64）：系统层提供租户 shell 环境与隔离工具；全局安装锁定版本的 `@deepseek-ai/dsh`；`corepack` 钉死 `pnpm` 并放到 PATH（`dsh plugin` 的官方安装器）；构建时把锁版本的 `@xmanrui/dsh-im` 装进 `/opt/dsh-seed/.dsh`；构建时锁版本 + sha256 校验装入 `apemind` CLI（`/usr/local/bin/apemind`，运行期零下载）；host-agent esbuild 单文件；`tini` 作 PID 1。暴露 8080/9090，数据卷 `/data`。
+全新镜像（node:22-bookworm-slim，amd64+arm64）：系统层提供租户 shell 环境与隔离工具；全局安装锁定版本的 `@deepseek-ai/dsh`；`corepack` 钉死 `pnpm` 并放到 PATH（`dsh plugin` 的官方安装器）；构建时把锁版本的 `@xmanrui/dsh-im` 和 `@michengai/dsh-automation` 装进 `/opt/dsh-seed/.dsh`；构建时锁版本 + sha256 校验装入 `apemind` CLI（`/usr/local/bin/apemind`，运行期零下载）；host-agent esbuild 单文件；`tini` 作 PID 1。暴露 8080/9090，数据卷 `/data`。
 
 - host-agent 以 root 运行（需要 setuid 切租户 uid 与 iptables）；容器保持尽可能少的 capability，P2 回环隔离时加 `NET_ADMIN`。
 - 私有化扩展点：客户 `FROM apecloud/apemind-computer` 再 apt 加自己的工具链。

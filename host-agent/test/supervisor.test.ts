@@ -316,15 +316,20 @@ test("state survives a supervisor restart via meta.json", async () => {
   }
 })
 
-test("start copies the baked dsh-im plugin into the tenant web profile", async () => {
+test("start copies the baked default plugins into the tenant web profile", async () => {
   const seed = fs.mkdtempSync(path.join(os.tmpdir(), "dsh-im-host-seed-"))
   try {
     const seedWeb = path.join(seed, "profiles", "web")
     fs.mkdirSync(path.join(seedWeb, "node_modules", "@xmanrui", "dsh-im"), { recursive: true })
+    fs.mkdirSync(path.join(seedWeb, "node_modules", "@michengai", "dsh-automation"), { recursive: true })
     fs.writeFileSync(path.join(seedWeb, "node_modules", "@xmanrui", "dsh-im", "index.js"), "ok\n")
+    fs.writeFileSync(path.join(seedWeb, "node_modules", "@michengai", "dsh-automation", "index.js"), "auto\n")
     fs.writeFileSync(
       path.join(seedWeb, "package.json"),
-      `${JSON.stringify({ name: "dsh-profile-web", dependencies: { "@xmanrui/dsh-im": "4.8.0" } }, null, 2)}\n`,
+      `${JSON.stringify({
+        name: "dsh-profile-web",
+        dependencies: { "@xmanrui/dsh-im": "4.8.0", "@michengai/dsh-automation": "0.1.25" },
+      }, null, 2)}\n`,
     )
     const env = await makeEnv({ COMPUTER_DSH_IM_SEED: seed })
     try {
@@ -332,14 +337,12 @@ test("start copies the baked dsh-im plugin into the tenant web profile", async (
       const pkgPath = path.join(env.cfg.dataDir, "users", "mina", ".dsh", "profiles", "web", "package.json")
       const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"))
       assert.equal(pkg.dependencies["@xmanrui/dsh-im"], "4.8.0")
+      assert.equal(pkg.dependencies["@michengai/dsh-automation"], "0.1.25")
       assert.ok(pkg.dsh.profile.bundles.includes("@xmanrui/dsh-im"))
-      assert.equal(
-        fs.readFileSync(
-          path.join(env.cfg.dataDir, "users", "mina", ".dsh", "profiles", "web", "node_modules", "@xmanrui", "dsh-im", "index.js"),
-          "utf8",
-        ),
-        "ok\n",
-      )
+      assert.ok(pkg.dsh.profile.bundles.includes("@michengai/dsh-automation"))
+      const webNm = path.join(env.cfg.dataDir, "users", "mina", ".dsh", "profiles", "web", "node_modules")
+      assert.equal(fs.readFileSync(path.join(webNm, "@xmanrui", "dsh-im", "index.js"), "utf8"), "ok\n")
+      assert.equal(fs.readFileSync(path.join(webNm, "@michengai", "dsh-automation", "index.js"), "utf8"), "auto\n")
     } finally {
       await env.cleanup()
     }

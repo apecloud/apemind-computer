@@ -26,8 +26,8 @@ export interface Config {
   /** Optional helper that sets PR_SET_PDEATHSIG + a new process group before exec. */
   dshExec: string
   /**
-   * Seed $DSH_HOME that already has @xmanrui/dsh-im installed. Empty disables
-   * the default IM plugin. The image writes this under /opt/dsh-seed/.dsh.
+   * Seed $DSH_HOME that already has the default web plugins installed. Empty
+   * disables seeding. The image writes this under /opt/dsh-seed/.dsh.
    */
   dshImSeed: string
   version: string

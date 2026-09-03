@@ -513,7 +513,7 @@ export class Supervisor {
     await this.syncManagedFiles(inst, extraEnv)
     const dshHome = path.join(home, ".dsh")
     const seeded = await ensureDefaultDshIm(dshHome, this.cfg.dshImSeed)
-    if (seeded.applied) log.info("default dsh-im seeded", { user: inst.userId })
+    if (seeded.applied) log.info("default plugins seeded", { user: inst.userId })
     if (inst.meta.uid !== undefined) {
       await chownTree(path.join(this.homeDir(inst.userId), ".apemind"), inst.meta.uid, inst.meta.uid)
       if (seeded.applied) await chownTree(path.join(dshHome, "profiles"), inst.meta.uid, inst.meta.uid)
