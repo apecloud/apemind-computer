@@ -66,9 +66,9 @@ RUN mkdir -p /opt/dsh-seed \
 # apemind CLI is baked in (no runtime download): pinned version, pinned
 # per-arch sha256, fetched from the public immutable release route.
 ARG TARGETARCH
-ARG APEMIND_CLI_VERSION=v0.3.4
-ARG APEMIND_CLI_SHA256_AMD64=bf00371d726a8ad8df146fa8cc4c9e268f6fa71cc50ab1ebe3958265a023cb87
-ARG APEMIND_CLI_SHA256_ARM64=95f5f7be81db464047522f7ed1b4c0369e3e82a8c5e92325659b84e0f02bbfaa
+ARG APEMIND_CLI_VERSION=v0.3.5
+ARG APEMIND_CLI_SHA256_AMD64=c1757a58ba36321047c2aeed066f5d8a9d4b14b368c8464a6b99cfb2be9a734c
+ARG APEMIND_CLI_SHA256_ARM64=c1044e3ecdd338db5bf152e833d4a5c82e5d54afb43c703333b832ff6c41ca0e
 RUN set -eu; \
     arch="${TARGETARCH:-amd64}"; \
     case "$arch" in \
