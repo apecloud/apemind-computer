@@ -18,7 +18,7 @@
   .dsh/                              DSH_HOME：dsh 自己的会话、缓存、settings
     AGENTS.md                        托管引导（host-agent 按 env.json 渲染，手工编辑下次 spawn 覆盖）
   .apemind/                          托管注入面，只有 host-agent 写：
-    meta.json                        实例持久状态（desired / createdAt / uid），0600
+    meta.json                        实例持久状态（desired / lastTrafficAt / createdAt / uid），0600
     env.json                         控制面注入的环境变量（含 APEMIND_API_KEY），0600
     managed.cordis.yml               dsh --patch 挂载的托管配置（MCP + 模型投影），0600
     dsh.log                          dsh 进程 stdout/stderr，追加写，0600
@@ -56,10 +56,11 @@
 
 ## 2. 实例状态机
 
-两个正交的状态：
+三份正交事实：
 
-- **desired**（持久，落 `meta.json`）：`running | stopped`。只有控制面 ensure 会改。表达「租户希望这台机器开着还是关着」。
-- **status**（内存）：`stopped | starting | running | error`。host-agent 重启后全部归 `stopped`，靠 desired 与流量恢复。
+- **desired**（持久，落 `meta.json`）：`running | stopped`。只有控制面 ensure 会改。表达「允不允许为这个租户启动进程」。闲置回收不准改它。
+- **status**（内存）：`stopped | starting | running | error`。当前有没有活着的 dsh。host-agent 重启后全部归 `stopped`，不落盘。
+- **lastTrafficAt**（持久，落 `meta.json`）：最后一次租户数据面流量。闲置 sweep 和重启后要不要拉回都读它。`init()` 不得写成「现在」。
 
 ```mermaid
 stateDiagram-v2
@@ -81,7 +82,7 @@ stateDiagram-v2
 - **停止**：SIGTERM，`settings.json` 的 `stop_grace_sec`（出厂 10s）内没退干净则 SIGKILL。
 - **崩溃退避**：`running` 中的进程意外退出且 desired 仍是 running 时，按 `min(500ms × 2^n, 30s)` 退避自动重启；连续超过 5 次转 `error` 放弃。任何一次 ensure/wake 都会清零失败计数、重新尝试。
 - **端口是易耗品**：每次启动从 `COMPUTER_PORT_BASE`（默认 31000）向上找空闲端口，重启后端口可能变。会话 cookie 只含实例键不含端口，所以对用户透明。
-- **host-agent 重启**：`init()` 扫 `/data/users/` 逐个读 `meta.json` 恢复注册表，所有实例 status=stopped，**不主动拉起任何进程**；desired=running 的实例等第一个带合法 cookie 的请求把它唤醒。冷备恢复语义与闲置回收完全一致。host-agent 进程自己退出时由 Docker / K8s 整容器拉起，镜像内不再套自动重启，见 [stability.md](stability.md)。
+- **host-agent 重启**：`init()` 扫 `/data/users/` 逐个读 `meta.json` 恢复注册表，所有实例 status=stopped。不按 `desired` 全量拉起。网关先听，再按闲置策略推导：`desired=running` 且 `lastTrafficAt` 存在，并且闲置关闭或流量仍在窗口内，则限流拉回。否则保持休眠，等 cookie / 打开再 `wake()`。host-agent 进程自己退出时由 Docker / K8s 整容器拉起，镜像内不再套自动重启，见 [stability.md](stability.md)。
 
 ## 3. 生命周期时序与控制面调用
 
@@ -174,11 +175,11 @@ uid 隔离开启时以分配的 uid/gid 运行；stdout/stderr 进 `.apemind/dsh
 
 **没有心跳协议。** 活跃度就是网关观测到的数据面流量：
 
-- 每个代理的 HTTP 请求 touch 一次 `lastActivity`；
+- 每个代理的 HTTP 请求 touch 一次 `lastActivity`，并节流写入 `meta.json` 的 `lastTrafficAt`；
 - WebSocket 双向任何数据帧都 touch（1 秒节流，避免热连接高频写时间戳）；
 - dsh 自己不上报任何东西，浏览器页面关闭 → WS 断 → 流量归零。
 
-回收循环：supervisor 每 60s 扫一遍，`status=running` 且 `now - lastActivity > idle_timeout_sec`（出厂 1800s = 30 分钟，见 `/data/settings.json`）的实例停进程。**desired 保持 running**——这正是「休眠」和「用户主动停止」的区别。
+回收循环：supervisor 每 60s 扫一遍，`status=running` 且 `now - lastActivity > idle_timeout_sec`（出厂 1800s = 30 分钟，见 `/data/settings.json`）的实例停进程。**desired 保持 running**——这正是「休眠」和「用户主动停止」的区别。宿主重启后用同一把尺子：假如宿主没死，闲置策略现在还会不会让它开着；会则限流拉回，不会则继续休眠。
 
 唤醒路径（网关内联完成，不经过 ApeMind）：
 

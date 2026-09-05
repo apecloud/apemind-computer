@@ -96,12 +96,12 @@ Dockerfile 的 `DSH_VERSION` 中锁定；`pnpm` 由 `corepack` 按 `PNPM_VERSION
 （运行期零下载）。升级 dsh、pnpm、默认插件或 CLI 一律走新镜像 tag 加回归验证。
 租户 HOME 与 CLI 身份注入见 [docs/lifecycle.md](docs/lifecycle.md) §1。
 
-当前发布 tag 是 `v0.2.13`。离线机先在联网环境导出镜像再 `docker load`：
+当前发布 tag 是 `v0.2.14`。离线机先在联网环境导出镜像再 `docker load`：
 
 ```bash
-docker pull apecloud/apemind-computer:v0.2.13
-docker save apecloud/apemind-computer:v0.2.13 -o apemind-computer-v0.2.13.tar
-docker load -i apemind-computer-v0.2.13.tar
+docker pull apecloud/apemind-computer:v0.2.14
+docker save apecloud/apemind-computer:v0.2.14 -o apemind-computer-v0.2.14.tar
+docker load -i apemind-computer-v0.2.14.tar
 ```
 
 Compose 样例见 `compose.example.yml`。ApeMind 离线交付把本组件放在
