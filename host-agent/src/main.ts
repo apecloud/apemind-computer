@@ -21,12 +21,23 @@ async function main(): Promise<void> {
   const gateway = new Gateway(cfg, identity, supervisor)
   const control = new Control(cfg, identity, supervisor)
 
-  gateway.server.listen(cfg.gatewayPort, () => {
-    log.info("gateway listening", { port: cfg.gatewayPort, publicOrigin: cfg.publicOrigin })
-  })
-  control.server.listen(cfg.controlPort, () => {
-    log.info("control listening", { port: cfg.controlPort })
-  })
+  await Promise.all([
+    new Promise<void>((resolve, reject) => {
+      gateway.server.once("error", reject)
+      gateway.server.listen(cfg.gatewayPort, () => {
+        log.info("gateway listening", { port: cfg.gatewayPort, publicOrigin: cfg.publicOrigin })
+        resolve()
+      })
+    }),
+    new Promise<void>((resolve, reject) => {
+      control.server.once("error", reject)
+      control.server.listen(cfg.controlPort, () => {
+        log.info("control listening", { port: cfg.controlPort })
+        resolve()
+      })
+    }),
+  ])
+  void supervisor.resumeKeptInstances()
 
   let shuttingDown = false
   const shutdown = (signal: string) => {

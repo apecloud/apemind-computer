@@ -385,8 +385,101 @@ test("state survives a supervisor restart via meta.json", async () => {
     assert.equal(view.status, "stopped")
     assert.equal(view.desired, "running")
     assert.equal(sup2.sessionGeneration("grace"), 1, "session generation must survive restarts")
+    assert.equal(view.last_activity, undefined, "init must not invent last_activity")
+    await sup2.resumeKeptInstances()
+    assert.equal(sup2.getView("grace")?.status, "stopped", "no lastTrafficAt means do not resume")
     const woken = await sup2.wake("grace")
     assert.equal(woken?.status, "running")
+    await sup2.shutdown()
+  } finally {
+    await env.cleanup()
+  }
+})
+
+async function restartSupervisor(env: Awaited<ReturnType<typeof makeEnv>>) {
+  await env.sup.shutdown()
+  const { Supervisor } = await import("../src/supervisor.ts")
+  const { loadHostSettings } = await import("../src/settings.ts")
+  const { CgroupManager } = await import("../src/cgroup.ts")
+  const sup = new Supervisor(env.cfg, loadHostSettings(env.cfg.dataDir), CgroupManager.unavailable())
+  await sup.init()
+  return sup
+}
+
+test("touch persists lastTrafficAt and resume follows the idle policy", async () => {
+  const env = await makeEnv()
+  try {
+    await env.sup.ensure("nova", "running")
+    env.sup.touch("nova")
+    await sleep(50)
+    const metaPath = path.join(env.cfg.dataDir, "users", "nova", ".apemind", "meta.json")
+    const written = JSON.parse(fs.readFileSync(metaPath, "utf8")) as { lastTrafficAt?: string }
+    assert.ok(written.lastTrafficAt)
+
+    const sup2 = await restartSupervisor(env)
+    const loaded = sup2.getView("nova")
+    assert.equal(loaded?.status, "stopped")
+    assert.equal(loaded?.desired, "running")
+    assert.equal(loaded?.last_activity, written.lastTrafficAt)
+    await sup2.resumeKeptInstances()
+    assert.equal(sup2.getView("nova")?.status, "running")
+    await sup2.shutdown()
+  } finally {
+    await env.cleanup()
+  }
+})
+
+test("resume skips user-stopped instances even with recent traffic", async () => {
+  const env = await makeEnv()
+  try {
+    await env.sup.ensure("orin", "running")
+    env.sup.touch("orin")
+    await sleep(50)
+    await env.sup.ensure("orin", "stopped")
+    const sup2 = await restartSupervisor(env)
+    await sup2.resumeKeptInstances()
+    const view = sup2.getView("orin")
+    assert.equal(view?.desired, "stopped")
+    assert.equal(view?.status, "stopped")
+    await sup2.shutdown()
+  } finally {
+    await env.cleanup()
+  }
+})
+
+test("resume skips instances whose traffic is outside the idle window", async () => {
+  const env = await makeEnv({}, { idle_timeout_sec: 1 })
+  try {
+    await env.sup.ensure("pax", "running")
+    env.sup.touch("pax")
+    await sleep(50)
+    const metaPath = path.join(env.cfg.dataDir, "users", "pax", ".apemind", "meta.json")
+    const meta = JSON.parse(fs.readFileSync(metaPath, "utf8")) as { lastTrafficAt?: string }
+    meta.lastTrafficAt = new Date(Date.now() - 60_000).toISOString()
+    fs.writeFileSync(metaPath, `${JSON.stringify(meta, null, 2)}\n`)
+    const sup2 = await restartSupervisor(env)
+    assert.ok(sup2.getView("pax")?.last_activity)
+    await sup2.resumeKeptInstances()
+    assert.equal(sup2.getView("pax")?.status, "stopped")
+    await sup2.shutdown()
+  } finally {
+    await env.cleanup()
+  }
+})
+
+test("idle_timeout 0 resumes any desired-running instance that has lastTrafficAt", async () => {
+  const env = await makeEnv({}, { idle_timeout_sec: 0 })
+  try {
+    await env.sup.ensure("quinn", "running")
+    env.sup.touch("quinn")
+    await sleep(50)
+    const metaPath = path.join(env.cfg.dataDir, "users", "quinn", ".apemind", "meta.json")
+    const meta = JSON.parse(fs.readFileSync(metaPath, "utf8")) as { lastTrafficAt?: string }
+    meta.lastTrafficAt = new Date(Date.now() - 60_000).toISOString()
+    fs.writeFileSync(metaPath, `${JSON.stringify(meta, null, 2)}\n`)
+    const sup2 = await restartSupervisor(env)
+    await sup2.resumeKeptInstances()
+    assert.equal(sup2.getView("quinn")?.status, "running")
     await sup2.shutdown()
   } finally {
     await env.cleanup()

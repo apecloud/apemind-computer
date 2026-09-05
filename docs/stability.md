@@ -29,7 +29,7 @@
 - 当时是 `running`，并且 `desired` 仍是 `running`（没人点停止、也不是宿主自己在关进程）：按 `min(500ms × 2^n, 30s)` 退避再拉起来。
 - 连续崩溃超过 5 次：标 `error`，不再自动重启。下一次 ensure / 网关唤醒会清掉失败计数再试。
 - 用户点停止、闲置回收、启动过程中就退出：不走这条自动重启。
-- host-agent 进程自己起来时：扫 `/data/users/*/meta.json` 恢复登记，**不主动拉起任何 dsh**。`desired=running` 的实例等第一个带合法 cookie 的请求再唤醒。冷启动和闲置回收是同一条原则，避免容器一醒就把所有人同时拉起来。
+- host-agent 进程自己起来时：扫 `/data/users/*/meta.json` 恢复登记，不按 `desired` 全量拉起。按闲置策略在 `lastTrafficAt` 上推导谁本该还开着，网关就绪后限流拉回；其余 `desired=running` 的实例等 cookie / 打开再唤醒。避免容器一醒把所有人同时拉起来。
 
 这些语义写在 `host-agent/src/supervisor.ts`。不要再请另一个进程管理器同时管同一批 dsh。
 
@@ -51,7 +51,7 @@
 - **父死子必须死。** host-agent 是唯一知道端口、会话、注入环境的人。它死了，旧 dsh 继续占着端口和 HOME，新 host-agent 再 spawn，就会出现两套进程抢同一户。镜像内重启会让「容器还活着、里面的 node 换了」变成常态，孤儿问题立刻变成真的。整容器重启反而干净：旧 cgroup 清空，新进程从 PVC 登记开始，按流量再唤醒。
 - **崩溃要看得见。** 编排重启会计数、打事件；镜像内循环会把崩溃藏成「容器一直 Ready」。
 - **不要两个管家。** K8s 已经在管这只容器。容器里再放 supervisord / systemd，存活探针和重启策略会对不上。
-- **本产品接受网关短暂停。** HOME 在 PVC 上，会话靠下次打开唤醒。host-agent 重启不是要零中断保活所有 dsh。
+- **本产品接受网关短暂停。** HOME 在 PVC 上。host-agent 重启不是要零中断保活 WebSocket；本该开着的进程按闲置策略限流拉回。
 
 本地 Docker 和集群用同一条原则：重启策略写在 compose / Helm 上，不写进镜像入口脚本。
 

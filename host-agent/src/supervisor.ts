@@ -18,6 +18,9 @@ interface InstanceMeta {
   desired: Desired
   createdAt: string
   uid?: number
+  /** Last tenant data-plane traffic. Idle sweep and post-restart resume
+   * both read this; host start must not invent it. */
+  lastTrafficAt?: string
   /** Bumped by revokeSessions; gateway sessions minted for an older value
    * stop verifying, so a control-plane revoke kicks every live cookie. */
   sessionGeneration?: number
@@ -30,7 +33,8 @@ interface Instance {
   port?: number
   proc?: ChildProcess
   startedAt?: Date
-  lastActivity: Date
+  lastActivity?: Date
+  lastTrafficWriteAt?: number
   consecutiveFailures: number
   error?: string
   stopping: boolean
@@ -55,6 +59,14 @@ export class StartError extends Error {}
 const MAX_CONSECUTIVE_FAILURES = 5
 const MAX_STARTUP_FAILURES = 2
 const READY_PROBE_INTERVAL_MS = 300
+const TRAFFIC_PERSIST_MS = 15_000
+const RESUME_CONCURRENCY = 2
+
+function parseLastTrafficAt(value: string | undefined): Date | undefined {
+  if (!value) return undefined
+  const parsed = new Date(value)
+  return Number.isNaN(parsed.getTime()) ? undefined : parsed
+}
 
 function readRssBytes(pid: number): number | undefined {
   try {
@@ -234,6 +246,7 @@ export class Supervisor {
   private readonly reservedPorts = new Set<number>()
   private sweepTimer?: NodeJS.Timeout
   private shuttingDown = false
+  private resumeStarted = false
 
   constructor(cfg: Config, settings: HostSettingsStore, cgroup?: CgroupManager) {
     this.cfg = cfg
@@ -286,7 +299,7 @@ export class Supervisor {
           userId: entry.name,
           meta,
           status: "stopped",
-          lastActivity: new Date(),
+          lastActivity: parseLastTrafficAt(meta.lastTrafficAt),
           consecutiveFailures: 0,
           stopping: false,
         })
@@ -319,7 +332,7 @@ export class Supervisor {
       desired: inst.meta.desired,
       port: inst.status === "running" || inst.status === "starting" ? inst.port : undefined,
       started_at: inst.startedAt?.toISOString(),
-      last_activity: inst.lastActivity.toISOString(),
+      last_activity: inst.lastActivity?.toISOString(),
       rss_bytes: inst.proc?.pid !== undefined ? readRssBytes(inst.proc.pid) : undefined,
       error: inst.status === "error" ? inst.error : undefined,
     }
@@ -327,7 +340,46 @@ export class Supervisor {
 
   touch(userId: string): void {
     const inst = this.instances.get(userId)
-    if (inst) inst.lastActivity = new Date()
+    if (!inst) return
+    const now = new Date()
+    inst.lastActivity = now
+    inst.meta.lastTrafficAt = now.toISOString()
+    const lastWrite = inst.lastTrafficWriteAt ?? 0
+    if (now.getTime() - lastWrite < TRAFFIC_PERSIST_MS) return
+    inst.lastTrafficWriteAt = now.getTime()
+    void this.persistMeta(inst).catch((err) => log.error("persist lastTrafficAt failed", { user: userId, err: String(err) }))
+  }
+
+  /** After the gateway is listening: start instances the idle policy would
+   * still keep running if this host process had never died. */
+  async resumeKeptInstances(): Promise<void> {
+    if (this.shuttingDown || this.resumeStarted) return
+    this.resumeStarted = true
+    const candidates = [...this.instances.values()].filter((inst) => this.shouldResume(inst))
+    if (candidates.length === 0) return
+    log.info("resuming instances kept by idle policy", { count: candidates.length })
+    const queue = [...candidates]
+    const worker = async () => {
+      while (queue.length > 0 && !this.shuttingDown) {
+        const inst = queue.shift()
+        if (!inst || !this.shouldResume(inst)) continue
+        inst.consecutiveFailures = 0
+        try {
+          await this.start(inst)
+        } catch (err) {
+          log.error("resume failed", { user: inst.userId, err: String(err) })
+        }
+      }
+    }
+    await Promise.all(Array.from({ length: Math.min(RESUME_CONCURRENCY, queue.length) }, () => worker()))
+  }
+
+  private shouldResume(inst: Instance): boolean {
+    if (inst.meta.desired !== "running") return false
+    if (!inst.meta.lastTrafficAt || !inst.lastActivity) return false
+    const idleSec = this.settings.snapshot().idle_timeout_sec
+    if (idleSec <= 0) return true
+    return Date.now() - inst.lastActivity.getTime() < idleSec * 1000
   }
 
   sessionGeneration(userId: string): number {
@@ -422,7 +474,7 @@ export class Supervisor {
       userId,
       meta,
       status: "stopped",
-      lastActivity: new Date(),
+      lastActivity: undefined,
       consecutiveFailures: 0,
       stopping: false,
     }
@@ -628,7 +680,7 @@ export class Supervisor {
       if (await probePort(port)) {
         inst.status = "running"
         inst.startedAt = new Date()
-        inst.lastActivity = new Date()
+        if (inst.lastActivity === undefined) inst.lastActivity = new Date()
         inst.consecutiveFailures = 0
         await this.addLoopbackRules(inst)
         log.info("dsh ready", { user: inst.userId, port, pid: proc.pid })
@@ -737,7 +789,7 @@ export class Supervisor {
     if (idleMs <= 0) return
     const now = Date.now()
     for (const inst of this.instances.values()) {
-      if (inst.status === "running" && now - inst.lastActivity.getTime() > idleMs) {
+      if (inst.status === "running" && inst.lastActivity && now - inst.lastActivity.getTime() > idleMs) {
         log.info("idle stop", { user: inst.userId })
         // desired stays running so the next authenticated request wakes it up
         void this.stopProcess(inst).catch((err) => log.error("idle stop failed", { user: inst.userId, err: String(err) }))
