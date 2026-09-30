@@ -58,6 +58,44 @@ test("env with mcp settings renders the managed patch and passes --patch", async
   }
 })
 
+test("changed managed env restarts a running dsh before ensure returns", async () => {
+  const env = await makeEnv()
+  try {
+    const first = await env.sup.ensure("refresh", "running", {
+      APEMIND_API_KEY: "sk-first",
+      APEMIND_BASE_URL: "https://first.test",
+      APEMIND_MCP_URL: "https://first.test/mcp",
+    })
+    const firstPid = env.sup.get("refresh")?.proc?.pid
+    assert.equal(first.status, "running")
+    assert.ok(firstPid)
+
+    const same = await env.sup.ensure("refresh", "running", {
+      APEMIND_API_KEY: "sk-first",
+      APEMIND_BASE_URL: "https://first.test",
+      APEMIND_MCP_URL: "https://first.test/mcp",
+    })
+    assert.equal(same.started_at, first.started_at)
+    assert.equal(env.sup.get("refresh")?.proc?.pid, firstPid)
+
+    const refreshed = await env.sup.ensure("refresh", "running", {
+      APEMIND_API_KEY: "sk-second",
+      APEMIND_BASE_URL: "https://second.test",
+      APEMIND_MCP_URL: "https://second.test/mcp",
+    })
+    assert.equal(refreshed.status, "running")
+    assert.notEqual(refreshed.started_at, first.started_at)
+    assert.notEqual(env.sup.get("refresh")?.proc?.pid, firstPid)
+    const persisted = JSON.parse(
+      fs.readFileSync(path.join(env.cfg.dataDir, "users", "refresh", ".apemind", "env.json"), "utf8"),
+    ) as Record<string, string>
+    assert.equal(persisted.APEMIND_BASE_URL, "https://second.test")
+    assert.equal(persisted.APEMIND_API_KEY, "sk-second")
+  } finally {
+    await env.cleanup()
+  }
+})
+
 test("env with llm projection renders the apemind provider row", async () => {
   const env = await makeEnv()
   try {

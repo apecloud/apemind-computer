@@ -48,7 +48,7 @@
 
 - **二进制位置**：`/usr/local/bin/apemind`，镜像层。dsh 进程的 `PATH` 继承自 host-agent，所以 agent 开箱就能跑 `apemind`。升级 CLI = 换镜像 tag，不改 PVC。
 - **身份在何时注入**：`POST /api/v2/computer/open`。控制面确保绑定身份的托管 key（个人=用户本人，组织=该组织服务用户），把 `APEMIND_API_KEY`、`APEMIND_BASE_URL`（由 MCP URL 去掉 `/mcp`）、组织实例另加 `APEMIND_ORG_ID` 一并放进 ensure 的 `env`。宿主整体重写该实例 `.apemind/env.json`，并派生 `managed.cordis.yml`、`.dsh/AGENTS.md` 与 `.config/apemind/` CLI profile。
-- **会不会持久化**：会。权威投影是 `env.json`（PVC，0600）。同一轮 ensure/spawn 再写一份 CLI profile（`$XDG_CONFIG_HOME/apemind`，0700/0600），因为 dsh 工具子进程会剥掉 `APEMIND_API_KEY`，CLI 必须靠这份文件认证。MCP 与模型网关仍读 dsh **进程**环境里的 key，不受剥离影响。闲置唤醒再 spawn 时两份一起按 `env.json` 重写。下一次 open 整体覆盖（key 轮换走这条）。进程已 running 时 open 只改磁盘：CLI 下次调用即读到新 profile，不必等冷启动；MCP/LLM 的进程环境要等下一次 spawn。
+- **会不会持久化**：会。权威投影是 `env.json`（PVC，0600）。同一轮 ensure/spawn 再写一份 CLI profile（`$XDG_CONFIG_HOME/apemind`，0700/0600），因为 dsh 工具子进程会剥掉 `APEMIND_API_KEY`，CLI 必须靠这份文件认证。MCP 与模型网关仍读 dsh **进程**环境里的 key，不受剥离影响。闲置唤醒再 spawn 时两份一起按 `env.json` 重写。下一次 open 整体覆盖（key 轮换走这条）；如果托管环境快照发生变化，host 会在这次 ensure 中重启正在运行的 dsh，再返回新的实例状态，因此 MCP/LLM 和 CLI 一起采用新投影。相同快照不会触发重启。
 
 ### 1.3 删除语义
 
