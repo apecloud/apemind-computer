@@ -205,6 +205,13 @@ function workspaceKind(env: Record<string, string>): "organization" | "personal"
   return env.APEMIND_ORG_ID ? "organization" : "personal"
 }
 
+function sameStringMap(left: Record<string, string>, right: Record<string, string>): boolean {
+  const leftKeys = Object.keys(left).sort()
+  const rightKeys = Object.keys(right).sort()
+  if (leftKeys.length !== rightKeys.length) return false
+  return leftKeys.every((key, index) => key === rightKeys[index] && left[key] === right[key])
+}
+
 /** Managed workspace guide, loaded by dsh from $DSH_HOME/AGENTS.md. Tells the
  * agent which identity this instance is bound to and which ApeMind channels
  * exist. Derived from env.json before every spawn (managed file: manual edits
@@ -403,13 +410,14 @@ export class Supervisor {
       if (this.instances.size >= this.settings.snapshot().max_instances) throw new CapacityError("max instances reached")
       inst = await this.createInstance(userId)
     }
-    if (env) await this.writeInstanceEnv(inst, env)
+    const envChanged = env ? await this.writeInstanceEnv(inst, env) : false
     if (inst.meta.desired !== desired) {
       inst.meta.desired = desired
       await this.persistMeta(inst)
     }
     if (desired === "running") {
       inst.consecutiveFailures = 0
+      if (envChanged && inst.status === "running") await this.stopProcess(inst)
       await this.start(inst)
     } else {
       await this.stopProcess(inst)
@@ -504,18 +512,21 @@ export class Supervisor {
     await fsp.writeFile(target, `${JSON.stringify(inst.meta, null, 2)}\n`, { mode: 0o600 })
   }
 
-  private async writeInstanceEnv(inst: Instance, env: Record<string, string>): Promise<void> {
+  private async writeInstanceEnv(inst: Instance, env: Record<string, string>): Promise<boolean> {
     for (const [key, value] of Object.entries(env)) {
       if (!/^[A-Z][A-Z0-9_]{0,63}$/.test(key) || typeof value !== "string") {
         throw new Error(`invalid env entry: ${key}`)
       }
     }
     renderManagedPatch(env)
+    const previous = await this.readInstanceEnv(inst)
+    const changed = !sameStringMap(previous, env)
     await fsp.writeFile(this.envPath(inst.userId), `${JSON.stringify(env, null, 2)}\n`, { mode: 0o600 })
     await this.syncManagedFiles(inst, env)
     if (inst.meta.uid !== undefined) {
       await chownTree(path.join(this.homeDir(inst.userId), ".apemind"), inst.meta.uid, inst.meta.uid)
     }
+    return changed
   }
 
   /** Patch yaml, workspace guide, and CLI profile are derived from env.json;
