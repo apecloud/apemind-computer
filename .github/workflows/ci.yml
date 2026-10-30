@@ -47,7 +47,15 @@ jobs:
         run: npm run build
 
   image:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            arch: amd64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -62,7 +70,40 @@ jobs:
           context: .
           file: Dockerfile
           push: false
-          platforms: linux/amd64
+          platforms: linux/${{ matrix.arch }}
+          load: true
+          tags: computer-smoke:${{ github.sha }}
+          cache-from: |
+            type=gha,scope=computer-release
+            type=gha,scope=computer-${{ matrix.arch }}
+          cache-to: type=gha,scope=computer-${{ matrix.arch }},mode=min,timeout=5m,ignore-error=true
+
+      - name: Verify image tools and real service startup
+        shell: bash
+        run: |
+          set -euo pipefail
+          image="computer-smoke:${{ github.sha }}"
+          docker run --rm --network none --entrypoint sh "$image" -ec '
+            test -x /usr/local/bin/dsh-exec
+            test -s /usr/local/share/apemind-computer/settings.json
+            test -s /opt/dsh-seed/.dsh/profiles/web/node_modules/@xmanrui/dsh-im/package.json
+            test -s /opt/dsh-seed/.dsh/profiles/web/node_modules/@michengai/dsh-automation/package.json
+            node --version
+            pnpm --version
+            apemind version
+          '
+          cid=$(docker run -d --network none -e COMPUTER_PUBLIC_ORIGIN=http://127.0.0.1:8080 "$image")
+          trap 'docker logs "$cid"; docker rm -f "$cid"' EXIT
+          ready=false
+          for attempt in $(seq 1 30); do
+            if docker exec "$cid" node -e 'fetch("http://127.0.0.1:8080/__healthz").then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))'; then
+              ready=true
+              break
+            fi
+            sleep 2
+          done
+          [[ "$ready" == true ]]
+          docker image inspect --format 'image_bytes={{.Size}}' "$image"
 
   chart:
     runs-on: ubuntu-latest
