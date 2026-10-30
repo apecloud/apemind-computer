@@ -86,5 +86,10 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           platforms: linux/amd64,linux/arm64
+          cache-from: |
+            type=gha,scope=computer-release
+            type=gha,scope=computer-amd64
+            type=gha,scope=computer-arm64
+          cache-to: type=gha,scope=computer-release,mode=min,timeout=5m,ignore-error=true
           build-args: |
             COMPUTER_VERSION=${{ steps.version.outputs.version }}
